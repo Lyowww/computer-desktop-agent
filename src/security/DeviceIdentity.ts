@@ -13,25 +13,24 @@ export interface DeviceIdentity {
 }
 
 export interface PublicIdentityStore {
-  get(key: "deviceId" | "paired" | "createdAt"): string | boolean | undefined;
-  set(key: "deviceId" | "paired" | "createdAt", value: string | boolean): void;
+  get(key: "deviceId" | "paired" | "createdAt" | "backendDeviceId"): string | boolean | undefined;
+  set(key: "deviceId" | "paired" | "createdAt" | "backendDeviceId", value: string | boolean): void;
 }
 
 class MemoryPublicStore implements PublicIdentityStore {
   private data = new Map<string, string | boolean>();
 
-  get(key: "deviceId" | "paired" | "createdAt"): string | boolean | undefined {
+  get(key: "deviceId" | "paired" | "createdAt" | "backendDeviceId"): string | boolean | undefined {
     return this.data.get(key);
   }
 
-  set(key: "deviceId" | "paired" | "createdAt", value: string | boolean): void {
+  set(key: "deviceId" | "paired" | "createdAt" | "backendDeviceId", value: string | boolean): void {
     this.data.set(key, value);
   }
 }
 
 function createDefaultPublicStore(): PublicIdentityStore {
   try {
-    // Lazy-load electron-store only when running inside Electron / when available.
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const Store = require("electron-store") as new (opts: {
       name: string;
@@ -81,12 +80,17 @@ export class DeviceProvisioning {
 
       const deviceSecret = randomBytes(32).toString("hex");
       await this.secureStorage.setSecret("deviceSecret", deviceSecret);
-      log.info("Generated new device identity", { deviceId });
+      log.info("Generated new local device identity", { deviceId });
     }
 
     const paired = Boolean(this.publicStore.get("paired"));
     if (!paired) {
       this.pairingCode = this.generatePairingCode();
+    }
+
+    const backendId = this.publicStore.get("backendDeviceId") as string | undefined;
+    if (backendId) {
+      deviceId = backendId;
     }
 
     return {
@@ -109,28 +113,34 @@ export class DeviceProvisioning {
     return this.pairingCode;
   }
 
-  async getAuthMaterial(): Promise<{
-    deviceId: string;
-    deviceSecret: string;
-    deviceToken: string | null;
-  }> {
-    const deviceId = this.publicStore.get("deviceId") as string | undefined;
-    if (!deviceId) {
-      throw new Error("Device identity not initialized");
-    }
-    const deviceSecret = await this.secureStorage.getSecret("deviceSecret");
-    if (!deviceSecret) {
-      throw new Error("Device secret missing from secure storage");
-    }
-    const deviceToken = await this.secureStorage.getSecret("deviceToken");
-    return { deviceId, deviceSecret, deviceToken };
+  async getDeviceToken(): Promise<string | null> {
+    return this.secureStorage.getSecret("deviceToken");
   }
 
-  async markPaired(deviceToken: string): Promise<void> {
+  /**
+   * Store the one-time device token from the web dashboard (Devices → Add device).
+   */
+  async setDeviceToken(deviceToken: string): Promise<void> {
+    if (!deviceToken || deviceToken.length < 16) {
+      throw new Error("Device token must be at least 16 characters");
+    }
     await this.secureStorage.setSecret("deviceToken", deviceToken);
     this.publicStore.set("paired", true);
     this.pairingCode = null;
-    log.info("Device paired successfully");
+    log.info("Device token stored in secure storage");
+  }
+
+  async markPairedWithBackendId(backendDeviceId: string): Promise<void> {
+    this.publicStore.set("paired", true);
+    this.publicStore.set("backendDeviceId", backendDeviceId);
+    this.publicStore.set("deviceId", backendDeviceId);
+    this.pairingCode = null;
+    log.info("Linked to backend device id", { backendDeviceId });
+  }
+
+  /** @deprecated Prefer setDeviceToken from dashboard */
+  async markPaired(deviceToken: string): Promise<void> {
+    await this.setDeviceToken(deviceToken);
   }
 
   async clearPairing(): Promise<void> {
@@ -145,13 +155,12 @@ export class DeviceProvisioning {
   }
 
   getDeviceId(): string | undefined {
-    return this.publicStore.get("deviceId") as string | undefined;
+    return (
+      (this.publicStore.get("backendDeviceId") as string | undefined) ||
+      (this.publicStore.get("deviceId") as string | undefined)
+    );
   }
 
-  /**
-   * Deterministic challenge response for authentication handshake.
-   * Never logs the secret or resulting digest contents beyond the hash itself.
-   */
   createAuthProof(nonce: string, deviceSecret: string): string {
     return createHash("sha256").update(`${nonce}:${deviceSecret}`).digest("hex");
   }

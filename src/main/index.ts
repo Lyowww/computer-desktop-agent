@@ -3,6 +3,7 @@ import {
   dialog,
   Notification,
 } from "electron";
+import { loadEnv } from "../config/env";
 import { Agent } from "../agent/Agent";
 import { registerIpcHandlers } from "../ipc/handlers";
 import { createTray } from "./tray";
@@ -10,6 +11,8 @@ import { openPairingWindow, openSettingsWindow } from "./windows";
 import { PermissionManager } from "../permissions/PermissionManager";
 import { rootLogger } from "../utils/logger";
 import type { AgentUiState } from "../agent/Agent";
+
+loadEnv();
 
 const log = rootLogger.child("main");
 
@@ -72,12 +75,16 @@ if (!gotLock) {
       trayController?.updateMenu();
     });
 
-    if (!uiState.paired) {
+    if (!uiState.hasDeviceToken) {
       openPairingWindow(getUiState);
       void showPermissionGuidance();
     }
 
-    log.info("Computer Desktop Agent started", { deviceId: uiState.deviceId });
+    log.info("Computer Desktop Agent started", {
+      deviceId: uiState.deviceId,
+      backendUrl: process.env.AGENT_BACKEND_URL,
+      hasDeviceToken: uiState.hasDeviceToken,
+    });
   });
 }
 
@@ -104,6 +111,7 @@ function getUiState(): AgentUiState {
       deviceId: agent?.getDeviceId() ?? "unknown",
       pairingCode: agent?.getPairingCode() ?? "------",
       locked: false,
+      hasDeviceToken: false,
     }
   );
 }

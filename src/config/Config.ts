@@ -1,6 +1,7 @@
 import os from "os";
 import { z } from "zod";
 import { rootLogger } from "../utils/logger";
+import { toSocketIoUrl } from "./env";
 
 const log = rootLogger.child("config");
 
@@ -8,15 +9,15 @@ const ConfigSchema = z.object({
   backendUrl: z
     .string()
     .min(1)
-    .default("ws://localhost:8080/agent")
+    .default("https://computer-agent-backend.onrender.com/ws")
     .refine((value) => {
       try {
-        const url = new URL(value);
-        return url.protocol === "ws:" || url.protocol === "wss:";
+        toSocketIoUrl(value);
+        return true;
       } catch {
         return false;
       }
-    }, "backendUrl must be a ws:// or wss:// URL"),
+    }, "backendUrl must be a valid ws(s):// or http(s):// URL"),
   deviceName: z.string().min(1).default(os.hostname()),
   autoConnect: z.boolean().default(true),
   paused: z.boolean().default(false),
@@ -77,7 +78,11 @@ export class ConfigService {
       ...(envUrl ? { backendUrl: envUrl } : {}),
       ...(envName ? { deviceName: envName } : {}),
     };
-    return ConfigSchema.parse(raw);
+    const parsed = ConfigSchema.parse(raw);
+    return {
+      ...parsed,
+      backendUrl: toSocketIoUrl(parsed.backendUrl),
+    };
   }
 
   set<K extends keyof AppConfig>(key: K, value: AppConfig[K]): void {

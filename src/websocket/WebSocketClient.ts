@@ -1,6 +1,7 @@
 import { EventEmitter } from "events";
-import WebSocket from "ws";
+import { io, Socket } from "socket.io-client";
 import { rootLogger } from "../utils/logger";
+import { toSocketIoUrl } from "../config/env";
 
 const log = rootLogger.child("websocket");
 
@@ -11,16 +12,11 @@ export interface ReconnectOptions {
 
 export type ConnectionState = "disconnected" | "connecting" | "connected" | "reconnecting";
 
-export interface AgentWebSocketEvents {
-  open: [];
-  close: [code: number, reason: string];
-  error: [error: Error];
-  message: [data: unknown];
-  state: [state: ConnectionState];
-}
-
+/**
+ * Socket.IO client matching the Computer Agent Backend (`namespace /ws`, channel=desktop-agent).
+ */
 export class AgentWebSocketClient extends EventEmitter {
-  private ws: WebSocket | null = null;
+  private socket: Socket | null = null;
   private url = "";
   private shouldReconnect = false;
   private attempt = 0;
@@ -28,6 +24,7 @@ export class AgentWebSocketClient extends EventEmitter {
   private state: ConnectionState = "disconnected";
   private readonly baseMs: number;
   private readonly maxMs: number;
+  private intentionalClose = false;
 
   constructor(options: ReconnectOptions = {}) {
     super();
@@ -40,37 +37,56 @@ export class AgentWebSocketClient extends EventEmitter {
   }
 
   isConnected(): boolean {
-    return this.state === "connected" && this.ws?.readyState === WebSocket.OPEN;
+    return this.state === "connected" && Boolean(this.socket?.connected);
   }
 
   connect(url: string): void {
-    this.url = url;
+    this.url = toSocketIoUrl(url);
     this.shouldReconnect = true;
+    this.intentionalClose = false;
     this.clearReconnectTimer();
     this.openSocket();
   }
 
   disconnect(): void {
     this.shouldReconnect = false;
+    this.intentionalClose = true;
     this.clearReconnectTimer();
     this.attempt = 0;
-    if (this.ws) {
-      this.ws.removeAllListeners();
-      if (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING) {
-        this.ws.close(1000, "client disconnect");
-      }
-      this.ws = null;
+    if (this.socket) {
+      this.socket.removeAllListeners();
+      this.socket.disconnect();
+      this.socket = null;
     }
     this.setState("disconnected");
   }
 
-  send(payload: unknown): boolean {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      log.warn("Cannot send; socket not open");
+  /**
+   * Emit a named Socket.IO event (preferred by the Nest gateway).
+   */
+  emitEvent(event: string, payload: unknown): boolean {
+    if (!this.socket?.connected) {
+      log.warn("Cannot emit; socket not connected", { event });
       return false;
     }
-    this.ws.send(JSON.stringify(payload));
+    this.socket.emit(event, payload);
     return true;
+  }
+
+  /**
+   * Backward-compatible helper: accepts { event, payload } envelopes.
+   */
+  send(payload: unknown): boolean {
+    if (
+      payload &&
+      typeof payload === "object" &&
+      "event" in payload &&
+      typeof (payload as { event: unknown }).event === "string"
+    ) {
+      const envelope = payload as { event: string; payload: unknown };
+      return this.emitEvent(envelope.event, envelope.payload);
+    }
+    return this.emitEvent("message", payload);
   }
 
   /**
@@ -86,64 +102,95 @@ export class AgentWebSocketClient extends EventEmitter {
       throw new Error("WebSocket URL not set");
     }
 
+    if (this.socket) {
+      this.socket.removeAllListeners();
+      this.socket.disconnect();
+      this.socket = null;
+    }
+
     this.setState(this.attempt > 0 ? "reconnecting" : "connecting");
     log.info("Connecting to backend", { url: this.url, attempt: this.attempt });
 
-    try {
-      this.ws = new WebSocket(this.url);
-    } catch (error) {
-      log.error("Failed to construct WebSocket", {
-        error: error instanceof Error ? error.message : String(error),
-      });
-      this.scheduleReconnect();
-      return;
-    }
+    this.socket = io(this.url, {
+      transports: ["websocket", "polling"],
+      query: { channel: "desktop-agent" },
+      autoConnect: true,
+      reconnection: false, // we own backoff so it matches product requirements
+      timeout: 20_000,
+      forceNew: true,
+    });
 
-    this.ws.on("open", () => {
+    this.socket.on("connect", () => {
       this.attempt = 0;
       this.setState("connected");
-      log.info("WebSocket connected");
+      log.info("Socket.IO connected", { id: this.socket?.id });
       this.emit("open");
     });
 
-    this.ws.on("message", (raw) => {
-      try {
-        const text = typeof raw === "string" ? raw : raw.toString("utf8");
-        const data = JSON.parse(text) as unknown;
-        this.emit("message", data);
-      } catch (error) {
-        log.warn("Received invalid JSON message", {
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-    });
-
-    this.ws.on("error", (error) => {
-      log.error("WebSocket error", { error: error.message });
-      this.emit("error", error);
-    });
-
-    this.ws.on("close", (code, reasonBuf) => {
-      const reason = reasonBuf.toString("utf8");
-      log.warn("WebSocket closed", { code, reason });
-      this.ws = null;
-      this.emit("close", code, reason);
-      if (this.shouldReconnect) {
+    this.socket.on("disconnect", (reason) => {
+      log.warn("Socket.IO disconnected", { reason });
+      this.emit("close", 0, reason);
+      if (this.shouldReconnect && !this.intentionalClose) {
         this.scheduleReconnect();
       } else {
         this.setState("disconnected");
       }
     });
+
+    this.socket.on("connect_error", (error) => {
+      log.error("Socket.IO connection error", { error: error.message || String(error) });
+      this.emit("error", error);
+      if (this.shouldReconnect && !this.intentionalClose) {
+        this.scheduleReconnect();
+      }
+    });
+
+    // Named events from backend
+    const forward = (event: string) => (payload: unknown) => {
+      this.emit("message", { event, payload });
+    };
+
+    for (const event of [
+      "DEVICE_REGISTERED",
+      "EXECUTE_ACTION",
+      "CAPTURE_SCREEN",
+      "NOTIFY",
+      "LIST_PROCESSES",
+      "LIST_APPS",
+      "PING",
+      "PONG",
+      "ERROR",
+      "PAUSE",
+      "RESUME",
+      "ACK",
+    ]) {
+      this.socket.on(event, forward(event));
+    }
+
+    // Envelope form also emitted by ConnectionRegistry
+    this.socket.on("message", (envelope: unknown) => {
+      if (
+        envelope &&
+        typeof envelope === "object" &&
+        "event" in envelope &&
+        typeof (envelope as { event: unknown }).event === "string"
+      ) {
+        this.emit("message", envelope);
+      }
+    });
   }
 
   private scheduleReconnect(): void {
+    if (this.reconnectTimer) return;
     this.attempt += 1;
     const delay = this.nextDelayMs(this.attempt);
     this.setState("reconnecting");
     log.info("Scheduling reconnect", { attempt: this.attempt, delayMs: delay });
-    this.clearReconnectTimer();
     this.reconnectTimer = setTimeout(() => {
-      this.openSocket();
+      this.reconnectTimer = null;
+      if (this.shouldReconnect) {
+        this.openSocket();
+      }
     }, delay);
   }
 

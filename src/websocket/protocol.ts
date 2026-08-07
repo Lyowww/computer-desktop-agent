@@ -1,38 +1,35 @@
 export type ClientEvent =
-  | "AUTH"
-  | "PAIR"
+  | "REGISTER_DEVICE"
   | "ACTION_RESULT"
   | "SCREEN_RESULT"
   | "STATUS"
   | "PONG"
-  | "ERROR";
+  | "ERROR"
+  | "PING";
 
-export interface AuthPayload {
-  deviceId: string;
+export interface RegisterDevicePayload {
+  deviceToken: string;
   deviceName: string;
-  proof?: string;
-  deviceToken?: string;
-  nonce?: string;
-  pairingCode?: string;
-  platform: string;
-  version: string;
+  os: "darwin" | "win32" | "linux";
 }
 
 export interface ActionResultPayload {
   actionId: string;
+  taskId: string;
   success: boolean;
+  result?: Record<string, unknown>;
+  error?: string;
+  /** Local-only enrichment (not always sent to backend) */
   status?: "OK" | "LOCKED" | "PAUSED" | "DENIED" | "ERROR";
-  message?: string;
-  data?: Record<string, unknown>;
 }
 
 export interface ScreenResultPayload {
   requestId: string;
+  taskId?: string;
   width: number;
   height: number;
-  format: "png";
-  imageBase64: string;
-  compressed?: boolean;
+  image: string;
+  mimeType?: "image/png" | "image/jpeg" | "image/webp";
 }
 
 export interface StatusPayload {

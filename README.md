@@ -66,35 +66,25 @@ AGENT_BACKEND_URL=ws://localhost:8080/agent
 AGENT_DEVICE_NAME=My-MacBook
 ```
 
-## Pairing
+## Pairing / device token
 
-On first launch the agent:
+The web dashboard creates devices and shows a **one-time device token**.
 
-1. Generates a local device ID + secret (secret stored in the OS keychain)
-2. Shows a 6-digit pairing code in a window and the tray menu
-3. Sends a `PAIR` message to the backend
-4. Stores the returned device token securely after successful pairing
+1. Open the dashboard → **Devices → Add device**
+2. Copy the `deviceToken` (shown once)
+3. Either:
+   - Paste it into the desktop agent **Connect** window, or
+   - Set `AGENT_DEVICE_TOKEN=...` in `.env` and restart
 
-## WebSocket protocol (agent → backend)
+The agent connects with Socket.IO to `{backend}/ws?channel=desktop-agent` and emits `REGISTER_DEVICE`.
 
-### Auth / pair
-
-```json
-{
-  "event": "AUTH",
-  "payload": {
-    "deviceId": "dev_…",
-    "deviceName": "hostname",
-    "deviceToken": "…",
-    "proof": "sha256(nonce:deviceSecret)",
-    "nonce": "n_…",
-    "platform": "darwin",
-    "version": "1.0.0"
-  }
-}
+```env
+AGENT_BACKEND_URL=wss://computer-agent-backend.onrender.com
+AGENT_DEVICE_NAME=My-MacBook
+AGENT_DEVICE_TOKEN=paste-token-here
 ```
 
-Unpaired devices send `PAIR` with `pairingCode` instead of `deviceToken`.
+> Note: the dashboard **login JWT** is only for the website. The desktop agent needs the **device token**, not the user session token.
 
 ### Action result
 

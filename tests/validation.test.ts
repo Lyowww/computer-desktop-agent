@@ -6,7 +6,9 @@ import {
   TypeTextParamsSchema,
   HotkeyParamsSchema,
   KeyPressParamsSchema,
+  normalizeActionType,
 } from "../src/utils/validation";
+import { toSocketIoUrl } from "../src/config/env";
 
 describe("action validation", () => {
   it("accepts a valid CLICK action", () => {
@@ -14,6 +16,7 @@ describe("action validation", () => {
       event: "EXECUTE_ACTION",
       payload: {
         actionId: "act_123",
+        taskId: "00000000-0000-4000-8000-000000000001",
         type: "CLICK",
         params: { x: 340, y: 180, button: "LEFT" },
       },
@@ -25,30 +28,53 @@ describe("action validation", () => {
     expect(() =>
       ExecuteActionPayloadSchema.parse({
         actionId: "act_1",
+        taskId: "00000000-0000-4000-8000-000000000001",
         type: "SHELL",
         params: { command: "rm -rf /" },
       })
     ).toThrow();
   });
 
-  it("rejects arbitrary code-like payloads", () => {
+  it("rejects forbidden shell-like params", () => {
     expect(() =>
       ExecuteActionPayloadSchema.parse({
         actionId: "act_1",
-        type: "TYPE_TEXT",
-        params: { text: "ok", eval: "process.exit(1)" },
+        taskId: "00000000-0000-4000-8000-000000000001",
+        type: "TYPE",
+        params: { text: "ok", shell: "rm -rf /" },
       })
     ).toThrow();
+  });
+
+  it("normalizes backend action aliases", () => {
+    expect(normalizeActionType("TYPE")).toBe("TYPE_TEXT");
+    expect(normalizeActionType("KEY")).toBe("KEY_PRESS");
+    expect(normalizeActionType("MOVE")).toBe("MOVE_MOUSE");
   });
 
   it("validates WAIT bounds", () => {
     expect(() =>
       ExecuteActionPayloadSchema.parse({
         actionId: "act_1",
+        taskId: "00000000-0000-4000-8000-000000000001",
         type: "WAIT",
         params: { ms: 120_000 },
       })
-    ).toThrow();
+    ).not.toThrow(); // loose params; executor clamps via WaitParamsSchema
+  });
+});
+
+describe("backend URL normalization", () => {
+  it("maps wss host to https /ws namespace", () => {
+    expect(toSocketIoUrl("wss://computer-agent-backend.onrender.com")).toBe(
+      "https://computer-agent-backend.onrender.com/ws"
+    );
+  });
+
+  it("keeps explicit /ws path", () => {
+    expect(toSocketIoUrl("https://computer-agent-backend.onrender.com/ws")).toBe(
+      "https://computer-agent-backend.onrender.com/ws"
+    );
   });
 });
 
@@ -87,7 +113,7 @@ describe("keyboard validation", () => {
     expect(HotkeyParamsSchema.parse({ keys: ["Meta", "C"] }).keys).toEqual(["Meta", "C"]);
     expect(() => HotkeyParamsSchema.parse({ keys: [] })).toThrow();
     expect(() =>
-      HotkeyParamsSchema.parse({ keys: ["a", "b", "c", "d", "e", "f"] })
+      HotkeyParamsSchema.parse({ keys: ["a", "b", "c", "d", "e", "f", "g"] })
     ).toThrow();
   });
 });

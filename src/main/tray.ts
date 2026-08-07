@@ -65,11 +65,11 @@ export function createTray(callbacks: TrayCallbacks): AppTray {
         label: `Device ID: ${state.deviceId.slice(0, 18)}${state.deviceId.length > 18 ? "…" : ""}`,
         enabled: false,
       },
-      ...(state.paired
+      ...(state.paired || state.hasDeviceToken
         ? []
         : [
             {
-              label: `Pairing code: ${state.pairingCode}`,
+              label: "Paste device token…",
               click: () => callbacks.onShowPairing(),
             } as Electron.MenuItemConstructorOptions,
           ]),
