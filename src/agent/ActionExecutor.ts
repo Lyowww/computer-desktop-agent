@@ -20,6 +20,7 @@ import { ApplicationService } from "../automation/applications/ApplicationServic
 import { ScreenshotService } from "../screenshot/ScreenshotService";
 import { PermissionManager } from "../permissions/PermissionManager";
 import { LockScreenDetector } from "../security/LockScreenDetector";
+import { UnlockService } from "../security/UnlockService";
 import { rootLogger } from "../utils/logger";
 import type { ActionResultPayload, ScreenResultPayload } from "../websocket/protocol";
 import { mouse, Button } from "@nut-tree-fork/nut-js";
@@ -33,7 +34,8 @@ export class ActionExecutor {
     private readonly apps = new ApplicationService(),
     private readonly screenshots = new ScreenshotService(),
     private readonly permissions = new PermissionManager(),
-    private readonly lockScreen = new LockScreenDetector()
+    private readonly lockScreen = new LockScreenDetector(),
+    private readonly unlock = new UnlockService()
   ) {}
 
   validateAction(raw: unknown): ExecuteActionPayload {
@@ -42,6 +44,50 @@ export class ActionExecutor {
 
   validateServerMessage(raw: unknown) {
     return ServerMessageSchema.parse(raw);
+  }
+
+  private lockedFailure(
+    actionId: string,
+    taskId: string,
+    detail?: string
+  ): ActionResultPayload {
+    return {
+      actionId,
+      taskId,
+      success: false,
+      status: "LOCKED",
+      error: detail ?? "Computer is locked; refusing input and capture",
+    };
+  }
+
+  /** Wake lock UI and type stored password when locked; otherwise no-op. */
+  private async ensureDesktopReady(
+    actionId: string,
+    taskId: string
+  ): Promise<ActionResultPayload | null> {
+    if (!(await this.lockScreen.isLocked())) {
+      return null;
+    }
+
+    const attempt = await this.unlock.ensureUnlocked();
+    if (attempt.ok) {
+      return null;
+    }
+
+    if (attempt.reason === "NO_PASSWORD") {
+      return this.lockedFailure(
+        actionId,
+        taskId,
+        "Computer is locked; set an unlock password in Settings to allow remote unlock"
+      );
+    }
+
+    return this.lockedFailure(
+      actionId,
+      taskId,
+      attempt.error ??
+        `Computer is locked; unlock failed (${attempt.reason.toLowerCase()})`
+    );
   }
 
   async execute(
@@ -58,20 +104,43 @@ export class ActionExecutor {
       };
     }
 
-    const locked = await this.lockScreen.isLocked();
-    if (locked) {
-      return {
-        actionId: action.actionId,
-        taskId: action.taskId,
-        success: false,
-        status: "LOCKED",
-        error: "Computer is locked; refusing input and capture",
-      };
-    }
-
     const type = normalizeActionType(action.type);
 
     try {
+      if (type === "LOCK_SCREEN") {
+        await this.unlock.openLockScreen();
+        return {
+          actionId: action.actionId,
+          taskId: action.taskId,
+          success: true,
+          status: "OK",
+          result: { locked: true },
+        };
+      }
+
+      if (type === "UNLOCK_SCREEN") {
+        const attempt = await this.unlock.ensureUnlocked();
+        if (!attempt.ok) {
+          return this.lockedFailure(
+            action.actionId,
+            action.taskId,
+            attempt.reason === "NO_PASSWORD"
+              ? "No unlock password configured in Settings"
+              : attempt.error ?? `Unlock failed (${attempt.reason.toLowerCase()})`
+          );
+        }
+        return {
+          actionId: action.actionId,
+          taskId: action.taskId,
+          success: true,
+          status: "OK",
+          result: { unlocked: true, alreadyUnlocked: Boolean(attempt.alreadyUnlocked) },
+        };
+      }
+
+      const lockBlock = await this.ensureDesktopReady(action.actionId, action.taskId);
+      if (lockBlock) return lockBlock;
+
       switch (type) {
         case "SCREENSHOT": {
           await this.permissions.assertReadyForScreenshot();
@@ -155,7 +224,8 @@ export class ActionExecutor {
             await this.mouseSvc.move(params.x, params.y);
           }
           const amount = Math.abs(params.amount ?? params.deltaY ?? 3);
-          const direction = params.direction ?? (params.deltaY !== undefined && params.deltaY < 0 ? "up" : "down");
+          const direction =
+            params.direction ?? (params.deltaY !== undefined && params.deltaY < 0 ? "up" : "down");
           if (direction === "up" || (params.deltaY !== undefined && params.deltaY < 0)) {
             await mouse.scrollUp(amount);
           } else if (direction === "left" || (params.deltaX !== undefined && params.deltaX < 0)) {
@@ -214,16 +284,8 @@ export class ActionExecutor {
     requestId: string,
     options: { maxWidth?: number; quality?: number; taskId?: string } = {}
   ): Promise<ScreenResultPayload | ActionResultPayload> {
-    const locked = await this.lockScreen.isLocked();
-    if (locked) {
-      return {
-        actionId: requestId,
-        taskId: options.taskId ?? requestId,
-        success: false,
-        status: "LOCKED",
-        error: "Computer is locked; refusing screenshot",
-      };
-    }
+    const lockBlock = await this.ensureDesktopReady(requestId, options.taskId ?? requestId);
+    if (lockBlock) return lockBlock;
 
     await this.permissions.assertReadyForScreenshot();
     const shot = await this.screenshots.capture({

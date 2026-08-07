@@ -61,6 +61,16 @@ export function registerIpcHandlers(ctx: IpcContext): void {
     }
   );
 
+  ipcMain.handle("agent:setUnlockPassword", async (_event, password: string) => {
+    await ctx.getAgent().setUnlockPassword(String(password ?? ""));
+    return true;
+  });
+
+  ipcMain.handle("agent:clearUnlockPassword", async () => {
+    await ctx.getAgent().clearUnlockPassword();
+    return true;
+  });
+
   ipcMain.handle("agent:getPermissions", async () => {
     const manager = new PermissionManager();
     return manager.getStatus();

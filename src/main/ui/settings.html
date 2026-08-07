@@ -26,6 +26,7 @@
       h2 { font-size: 13px; margin: 18px 0 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
       label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
       input[type="text"],
+      input[type="password"],
       textarea {
         width: 100%;
         border-radius: 10px;
@@ -138,6 +139,19 @@
       <textarea id="deviceToken" placeholder="Leave blank to keep the current token" spellcheck="false"></textarea>
       <div class="ok" id="credOk" hidden></div>
       <div class="err" id="credErr" hidden></div>
+
+      <h2>Lock screen unlock</h2>
+      <p class="hint">
+        Optional. When the Mac is locked, the agent wakes the lock screen and types this password
+        (Enter) so remote actions can continue. Stored in the macOS Keychain — never logged.
+      </p>
+      <label for="unlockPassword">macOS login password</label>
+      <input id="unlockPassword" type="password" placeholder="Leave blank to keep the current password" autocomplete="off" />
+      <div class="ok" id="unlockOk" hidden></div>
+      <div class="err" id="unlockErr" hidden></div>
+      <div class="status" id="unlockStatus">Unlock password: …</div>
+      <button id="saveUnlock">Save unlock password</button>
+      <button class="secondary" id="clearUnlock">Clear unlock password</button>
 
       <button id="save">Save &amp; reconnect</button>
       <button class="secondary" id="reconnect">Reconnect</button>

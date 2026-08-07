@@ -41,8 +41,14 @@ async function load() {
       `<div>Save credentials and reconnect to go online.</div>`;
   }
 
+  document.getElementById("unlockStatus").textContent = state.hasUnlockPassword
+    ? "Unlock password: saved in Keychain"
+    : "Unlock password: not set (locked Mac will refuse actions)";
+
   const lines = [
     `Token saved: ${state.hasDeviceToken ? "yes" : "no"}`,
+    `Unlock password: ${state.hasUnlockPassword ? "yes" : "no"}`,
+    `Screen locked: ${state.locked ? "yes" : "no"}`,
     `Accessibility: ${perms.accessibility ? "granted" : "missing"}`,
     `Screen Recording: ${perms.screenRecording ? "granted" : "missing"}`,
     ...(perms.guidance || []),
@@ -91,6 +97,46 @@ document.getElementById("save").addEventListener("click", async () => {
     ok.textContent = deviceToken
       ? "Device name + token saved. Reconnecting…"
       : "Settings saved. Reconnecting…";
+    await load();
+  } catch (error) {
+    err.hidden = false;
+    err.textContent = error?.message || String(error);
+  }
+});
+
+document.getElementById("saveUnlock").addEventListener("click", async () => {
+  const ok = document.getElementById("unlockOk");
+  const err = document.getElementById("unlockErr");
+  ok.hidden = true;
+  err.hidden = true;
+  const password = document.getElementById("unlockPassword").value;
+  if (!password.trim()) {
+    err.hidden = false;
+    err.textContent = "Enter your macOS login password to save it.";
+    return;
+  }
+  try {
+    await window.agentApi.setUnlockPassword(password);
+    document.getElementById("unlockPassword").value = "";
+    ok.hidden = false;
+    ok.textContent = "Unlock password saved to Keychain.";
+    await load();
+  } catch (error) {
+    err.hidden = false;
+    err.textContent = error?.message || String(error);
+  }
+});
+
+document.getElementById("clearUnlock").addEventListener("click", async () => {
+  const ok = document.getElementById("unlockOk");
+  const err = document.getElementById("unlockErr");
+  ok.hidden = true;
+  err.hidden = true;
+  try {
+    await window.agentApi.clearUnlockPassword();
+    document.getElementById("unlockPassword").value = "";
+    ok.hidden = false;
+    ok.textContent = "Unlock password cleared.";
     await load();
   } catch (error) {
     err.hidden = false;

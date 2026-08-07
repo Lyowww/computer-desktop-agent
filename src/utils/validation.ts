@@ -122,6 +122,8 @@ export const WireActionTypeSchema = z.enum([
   "WAIT",
   "SCROLL",
   "DRAG",
+  "LOCK_SCREEN",
+  "UNLOCK_SCREEN",
   "DONE",
   "FAIL",
 ]);
@@ -322,6 +324,8 @@ export function normalizeActionType(
   | "WAIT"
   | "SCROLL"
   | "DRAG"
+  | "LOCK_SCREEN"
+  | "UNLOCK_SCREEN"
   | "DONE"
   | "FAIL" {
   switch (type) {

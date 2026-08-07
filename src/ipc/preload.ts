@@ -13,6 +13,8 @@ export interface AgentBridge {
     deviceName: string;
     deviceToken: string;
   }) => Promise<boolean>;
+  setUnlockPassword: (password: string) => Promise<boolean>;
+  clearUnlockPassword: () => Promise<boolean>;
   getPermissions: () => Promise<unknown>;
   openPermissionSettings: (kind: "accessibility" | "screenRecording") => Promise<boolean>;
   openLogs: () => Promise<boolean>;
@@ -32,6 +34,8 @@ const bridge: AgentBridge = {
   copyPairingCode: () => ipcRenderer.invoke("agent:copyPairingCode"),
   setDeviceToken: (token) => ipcRenderer.invoke("agent:setDeviceToken", token),
   setupCredentials: (payload) => ipcRenderer.invoke("agent:setupCredentials", payload),
+  setUnlockPassword: (password) => ipcRenderer.invoke("agent:setUnlockPassword", password),
+  clearUnlockPassword: () => ipcRenderer.invoke("agent:clearUnlockPassword"),
   getPermissions: () => ipcRenderer.invoke("agent:getPermissions"),
   openPermissionSettings: (kind) => ipcRenderer.invoke("agent:openPermissionSettings", kind),
   openLogs: () => ipcRenderer.invoke("agent:openLogs"),

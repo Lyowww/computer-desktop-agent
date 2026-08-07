@@ -12,7 +12,7 @@ This repository is the **desktop agent only**. It does not include a website, AI
 - Zod-validated actions only — no arbitrary shell or code execution
 - Mouse, keyboard, allowlisted app launch, screenshot capture
 - Permission manager (Accessibility + Screen Recording on macOS)
-- Lock-screen detection — refuses control/capture while locked (`status: LOCKED`)
+- Lock-screen detection — optional Keychain unlock password wakes the lock UI and types the password when configured; otherwise refuses (`status: LOCKED`)
 - Structured local logging with secret/screenshot redaction
 - Cross-platform packaging via electron-builder (`.dmg`, `.exe`, `.AppImage`)
 
@@ -29,6 +29,8 @@ This repository is the **desktop agent only**. It does not include a website, AI
 | `HOTKEY` | Chord of keys |
 | `OPEN_APP` | Launch allowlisted app |
 | `WAIT` | Wait up to 60s |
+| `LOCK_SCREEN` | Open / engage the OS lock screen |
+| `UNLOCK_SCREEN` | Wake lock UI and type the stored unlock password |
 
 ## Requirements
 
@@ -43,7 +45,7 @@ Grant in **System Settings → Privacy & Security**:
 1. **Accessibility** — mouse/keyboard control
 2. **Screen Recording** — screenshots (restart the app after granting)
 
-The agent never bypasses OS permissions or the login/lock screen.
+The agent never bypasses OS permissions. If you save an unlock password in Settings (Keychain), locked sessions can be unlocked the same way a person would: wake the lock UI and type that password.
 
 ## Setup
 
@@ -84,6 +86,8 @@ Optional local-dev overrides:
 AGENT_BACKEND_URL=wss://computer-agent-backend.onrender.com
 AGENT_DEVICE_NAME=My-MacBook
 AGENT_DEVICE_TOKEN=paste-token-here
+# Optional: macOS login password for remote unlock (prefer Settings → Keychain)
+# AGENT_UNLOCK_PASSWORD=
 ```
 
 > Note: the dashboard **login JWT** is only for the website. The desktop agent needs the **device token**, not the user session token.
@@ -101,7 +105,7 @@ AGENT_DEVICE_TOKEN=paste-token-here
 }
 ```
 
-Locked desktop:
+Locked desktop (no unlock password configured):
 
 ```json
 {
@@ -113,6 +117,8 @@ Locked desktop:
   }
 }
 ```
+
+When an unlock password is saved in Settings, the agent wakes the lock screen, types the password, and retries the action instead of returning `LOCKED`.
 
 ### Screenshot result
 
@@ -168,11 +174,11 @@ The agent will **never**:
 
 - execute arbitrary shell commands
 - execute arbitrary JavaScript from the backend
-- bypass OS security, antivirus, or login/lock screens
-- store auth tokens in plaintext when the OS keychain is available
+- bypass OS permissions, antivirus, or authentication without the user-configured unlock password
+- store auth tokens or unlock passwords in plaintext when the OS keychain is available
 - log passwords, tokens, or screenshot image data
 
-Only predefined, Zod-validated actions are executed. Application launch uses an allowlist with OS-specific path resolution (`execFile`, never shell string interpolation).
+Only predefined, Zod-validated actions are executed. Application launch uses an allowlist with OS-specific path resolution (`execFile`, never shell string interpolation). Optional lock-screen unlock uses Accessibility to type the password you save in Settings — it does not crack or skip login.
 
 ## Tests
 

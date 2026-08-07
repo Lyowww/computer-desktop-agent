@@ -173,6 +173,7 @@ function getUiState(): AgentUiState {
       pairingCode: agent?.getPairingCode() ?? "------",
       locked: false,
       hasDeviceToken: false,
+      hasUnlockPassword: false,
       backendUrl: configService.get().backendUrl,
     }
   );

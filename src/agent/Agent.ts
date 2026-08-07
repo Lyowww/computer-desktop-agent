@@ -6,6 +6,7 @@ import { ActionExecutor } from "./ActionExecutor";
 import { DeviceProvisioning } from "../security/DeviceIdentity";
 import { PermissionManager } from "../permissions/PermissionManager";
 import { LockScreenDetector } from "../security/LockScreenDetector";
+import { UnlockService } from "../security/UnlockService";
 import { NotifyService } from "../automation/system/NotifyService";
 import { SystemInfoService } from "../automation/system/SystemInfoService";
 import { ApplicationService } from "../automation/applications/ApplicationService";
@@ -32,6 +33,7 @@ export type AgentUiState = {
   pairingCode: string;
   locked: boolean;
   hasDeviceToken: boolean;
+  hasUnlockPassword: boolean;
   backendUrl: string;
 };
 
@@ -41,6 +43,7 @@ export class Agent extends EventEmitter {
   private readonly device: DeviceProvisioning;
   private readonly permissions: PermissionManager;
   private readonly lockScreen: LockScreenDetector;
+  private readonly unlock: UnlockService;
   private readonly notify: NotifyService;
   private readonly systemInfo: SystemInfoService;
   private readonly apps: ApplicationService;
@@ -61,6 +64,7 @@ export class Agent extends EventEmitter {
     device?: DeviceProvisioning;
     permissions?: PermissionManager;
     lockScreen?: LockScreenDetector;
+    unlock?: UnlockService;
     config?: ConfigService;
   }) {
     super();
@@ -76,6 +80,7 @@ export class Agent extends EventEmitter {
     this.device = deps?.device ?? new DeviceProvisioning();
     this.permissions = deps?.permissions ?? new PermissionManager();
     this.lockScreen = deps?.lockScreen ?? new LockScreenDetector();
+    this.unlock = deps?.unlock ?? new UnlockService();
     this.notify = new NotifyService();
     this.systemInfo = new SystemInfoService();
     this.apps = new ApplicationService();
@@ -176,6 +181,7 @@ export class Agent extends EventEmitter {
       pairingCode: this.pairingCode,
       locked,
       hasDeviceToken: this.hasDeviceToken,
+      hasUnlockPassword: await this.unlock.hasPassword(),
       backendUrl: cfg.backendUrl,
     };
   }
@@ -219,6 +225,16 @@ export class Agent extends EventEmitter {
     log.info("Saved device credentials from setup form", { deviceName });
     this.emitUi();
     this.reconnect();
+  }
+
+  async setUnlockPassword(password: string): Promise<void> {
+    await this.unlock.setPassword(password);
+    this.emitUi();
+  }
+
+  async clearUnlockPassword(): Promise<void> {
+    await this.unlock.clearPassword();
+    this.emitUi();
   }
 
   async takeLocalScreenshot(): Promise<{ width: number; height: number; imageBase64: string }> {
