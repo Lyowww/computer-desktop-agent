@@ -167,7 +167,35 @@ export class AgentWebSocketClient extends EventEmitter {
       "message",
     ]);
 
+    const commandEvents = new Set([
+      "CAPTURE_SCREEN",
+      "NOTIFY",
+      "EXECUTE_ACTION",
+      "LIST_PROCESSES",
+      "LIST_APPS",
+      "DEVICE_REGISTERED",
+      "PING",
+      "ERROR",
+      "PAUSE",
+      "RESUME",
+    ]);
+
+    const payloadSummary = (payload: unknown): Record<string, unknown> => {
+      if (payload === null) return { payload: null };
+      if (payload === undefined) return { payload: "undefined" };
+      if (typeof payload !== "object") return { payloadType: typeof payload };
+      const obj = payload as Record<string, unknown>;
+      return {
+        payloadKeys: Object.keys(obj),
+        requestId: typeof obj.requestId === "string" ? obj.requestId : undefined,
+        hasBody: typeof obj.body === "string",
+      };
+    };
+
     const forward = (event: string) => (payload: unknown) => {
+      if (commandEvents.has(event)) {
+        log.info("Socket inbound", { event, via: "named", ...payloadSummary(payload) });
+      }
       this.emit("message", { event, payload });
     };
 
@@ -177,9 +205,13 @@ export class AgentWebSocketClient extends EventEmitter {
     }
 
     // Surface unexpected inbound events in Logs (helps diagnose routing gaps).
-    this.socket.onAny((event: string) => {
-      if (known.has(event) || event === "connect" || event === "disconnect") return;
-      log.info("Socket inbound (unhandled name)", { event });
+    this.socket.onAny((event: string, ...args: unknown[]) => {
+      if (event === "connect" || event === "disconnect") return;
+      if (known.has(event)) return;
+      log.info("Socket inbound (unhandled name)", {
+        event,
+        ...payloadSummary(args[0]),
+      });
     });
 
     // Envelope form also emitted by ConnectionRegistry
@@ -190,7 +222,19 @@ export class AgentWebSocketClient extends EventEmitter {
         "event" in envelope &&
         typeof (envelope as { event: unknown }).event === "string"
       ) {
+        const env = envelope as { event: string; payload?: unknown; data?: unknown };
+        if (commandEvents.has(env.event)) {
+          log.info("Socket inbound", {
+            event: env.event,
+            via: "envelope",
+            ...payloadSummary(env.payload ?? env.data),
+          });
+        }
         this.emit("message", envelope);
+      } else {
+        log.warn("Socket inbound envelope ignored", {
+          type: envelope === null ? "null" : typeof envelope,
+        });
       }
     });
   }

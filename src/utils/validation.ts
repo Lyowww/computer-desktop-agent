@@ -309,9 +309,19 @@ export function normalizeActionType(
   }
 }
 
+/** Events that must carry a real object payload (Nest null echoes are noise). */
+const COMMAND_EVENTS_REQUIRING_PAYLOAD = new Set([
+  "EXECUTE_ACTION",
+  "CAPTURE_SCREEN",
+  "NOTIFY",
+  "LIST_PROCESSES",
+  "LIST_APPS",
+]);
+
 /**
  * Normalize raw socket payloads before Zod.
  * Drops null Nest echoes and ignored event names.
+ * Maps Nest-style `{ event, data }` → `{ event, payload }`.
  */
 export function normalizeIncomingMessage(
   raw: unknown
@@ -319,7 +329,7 @@ export function normalizeIncomingMessage(
   if (!raw || typeof raw !== "object") {
     return { kind: "ignore", reason: "non-object" };
   }
-  const obj = raw as Record<string, unknown>;
+  const obj = { ...(raw as Record<string, unknown>) };
   const event = obj.event;
   if (typeof event !== "string") {
     return { kind: "ignore", reason: "missing event" };
@@ -327,11 +337,31 @@ export function normalizeIncomingMessage(
   if (IGNORED_SERVER_EVENTS.has(event)) {
     return { kind: "ignore", reason: `ignored event ${event}` };
   }
+
+  // Nest IoAdapter uses `data`; our protocol uses `payload`.
+  if (
+    (obj.payload === null || obj.payload === undefined) &&
+    obj.data !== null &&
+    obj.data !== undefined
+  ) {
+    obj.payload = obj.data;
+  }
+
   if (obj.payload === null || obj.payload === undefined) {
-    // Nest IoAdapter re-emits {event, data:undefined} → null payload echoes
-    if (event === "DEVICE_REGISTERED" || event === "PONG" || event === "ERROR" || event === "ACK") {
+    // Nest IoAdapter re-emits `{ event, data: undefined }` → null payload echoes
+    if (
+      event === "DEVICE_REGISTERED" ||
+      event === "PONG" ||
+      event === "ERROR" ||
+      event === "ACK" ||
+      event === "PING" ||
+      event === "PAUSE" ||
+      event === "RESUME" ||
+      COMMAND_EVENTS_REQUIRING_PAYLOAD.has(event)
+    ) {
       return { kind: "ignore", reason: `null payload echo for ${event}` };
     }
   }
-  return { kind: "ok", message: raw };
+
+  return { kind: "ok", message: obj };
 }

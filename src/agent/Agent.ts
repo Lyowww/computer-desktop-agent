@@ -273,8 +273,27 @@ export class Agent extends EventEmitter {
   }
 
   private async onMessage(raw: unknown): Promise<void> {
+    const rawEvent =
+      raw && typeof raw === "object" && "event" in raw
+        ? String((raw as { event: unknown }).event)
+        : undefined;
+
     const normalized = normalizeIncomingMessage(raw);
     if (normalized.kind === "ignore") {
+      // Surface dropped command echoes — these are why web NOTIFY times out if the
+      // real payload never arrives (backend/Nest null emit).
+      if (
+        rawEvent === "NOTIFY" ||
+        rawEvent === "CAPTURE_SCREEN" ||
+        rawEvent === "EXECUTE_ACTION" ||
+        rawEvent === "LIST_PROCESSES" ||
+        rawEvent === "LIST_APPS"
+      ) {
+        log.warn("Dropped inbound command (no usable payload)", {
+          event: rawEvent,
+          reason: normalized.reason,
+        });
+      }
       return;
     }
 
@@ -284,7 +303,15 @@ export class Agent extends EventEmitter {
     } catch (error) {
       const details =
         error instanceof ZodError ? error.errors.map((e) => e.message).join("; ") : String(error);
-      log.warn("Rejected invalid server message", { details });
+      const preview =
+        normalized.message && typeof normalized.message === "object"
+          ? {
+              event: (normalized.message as { event?: string }).event,
+              payloadType: typeof (normalized.message as { payload?: unknown }).payload,
+              payloadIsNull: (normalized.message as { payload?: unknown }).payload === null,
+            }
+          : { rawType: typeof normalized.message };
+      log.warn("Rejected invalid server message", { details, ...preview });
       // Do not emit ERROR back for protocol noise — it can loop with Nest null echoes.
       return;
     }

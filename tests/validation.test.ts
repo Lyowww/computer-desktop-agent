@@ -7,6 +7,7 @@ import {
   HotkeyParamsSchema,
   KeyPressParamsSchema,
   normalizeActionType,
+  normalizeIncomingMessage,
 } from "../src/utils/validation";
 import { toSocketIoUrl } from "../src/config/env";
 
@@ -115,5 +116,35 @@ describe("keyboard validation", () => {
     expect(() =>
       HotkeyParamsSchema.parse({ keys: ["a", "b", "c", "d", "e", "f", "g"] })
     ).toThrow();
+  });
+});
+
+describe("normalizeIncomingMessage", () => {
+  it("maps Nest-style data to payload", () => {
+    const result = normalizeIncomingMessage({
+      event: "NOTIFY",
+      data: { requestId: "r1", body: "hello" },
+    });
+    expect(result.kind).toBe("ok");
+    if (result.kind === "ok") {
+      expect(result.message).toEqual({
+        event: "NOTIFY",
+        data: { requestId: "r1", body: "hello" },
+        payload: { requestId: "r1", body: "hello" },
+      });
+    }
+  });
+
+  it("drops null-payload command echoes instead of failing Zod", () => {
+    const result = normalizeIncomingMessage({ event: "NOTIFY", payload: null });
+    expect(result).toEqual({ kind: "ignore", reason: "null payload echo for NOTIFY" });
+  });
+
+  it("keeps a valid NOTIFY envelope", () => {
+    const result = normalizeIncomingMessage({
+      event: "NOTIFY",
+      payload: { requestId: "r1", body: "hi" },
+    });
+    expect(result.kind).toBe("ok");
   });
 });
