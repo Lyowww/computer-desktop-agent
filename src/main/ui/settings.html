@@ -44,6 +44,52 @@
       }
       .row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
       .status { font-size: 13px; color: var(--muted); margin-bottom: 12px; }
+      .connection-banner {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin: 0 0 14px;
+        padding: 12px 14px;
+        border-radius: 12px;
+        border: 1px solid #2a3542;
+        background: #0b1016;
+      }
+      .connection-banner.online {
+        border-color: #2f6b52;
+        background: color-mix(in srgb, #143528 80%, #0b1016);
+      }
+      .connection-banner.connecting {
+        border-color: #6b5a2f;
+        background: color-mix(in srgb, #3a3014 70%, #0b1016);
+      }
+      .connection-banner.offline {
+        border-color: #5a3030;
+        background: color-mix(in srgb, #3a1818 60%, #0b1016);
+      }
+      .connection-title {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 14px;
+        font-weight: 650;
+      }
+      .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #9aa7b5;
+        flex-shrink: 0;
+      }
+      .online .dot { background: #5ddea8; box-shadow: 0 0 0 3px rgba(93, 222, 168, 0.18); }
+      .connecting .dot { background: #ffd27a; box-shadow: 0 0 0 3px rgba(255, 210, 122, 0.18); }
+      .offline .dot { background: #ff8f8f; }
+      .connection-detail {
+        font-size: 12px;
+        color: var(--muted);
+        word-break: break-all;
+        line-height: 1.45;
+      }
+      .connection-detail strong { color: var(--fg); font-weight: 600; }
       .ok { color: #5ddea8; font-size: 12px; margin-bottom: 10px; }
       .err { color: #ff8f8f; font-size: 12px; margin-bottom: 10px; }
       button {
@@ -71,7 +117,10 @@
   <body>
     <div class="card">
       <h1>Settings</h1>
-      <div class="status" id="status">…</div>
+      <div id="connectionBanner" class="connection-banner offline">
+        <div class="connection-title"><span class="dot"></span><span id="connectionLabel">…</span></div>
+        <div class="connection-detail" id="connectionDetail"></div>
+      </div>
 
       <h2>Connection</h2>
       <label for="backendUrl">Backend Socket.IO URL</label>
@@ -92,6 +141,7 @@
 
       <button id="save">Save &amp; reconnect</button>
       <button class="secondary" id="reconnect">Reconnect</button>
+      <button class="secondary" id="logs">Open logs</button>
       <button class="secondary" id="accessibility">Open Accessibility settings</button>
       <button class="secondary" id="screen">Open Screen Recording settings</button>
       <div class="perms" id="perms"></div>

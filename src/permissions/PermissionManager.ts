@@ -224,12 +224,7 @@ export class PermissionManager {
 
   async getStatus(): Promise<PermissionStatus> {
     const status = await this.adapter.check();
-    log.info("Permission status", {
-      accessibility: status.accessibility,
-      screenRecording: status.screenRecording,
-      platform: status.platform,
-      processLabel: status.processLabel,
-    });
+    // Avoid spamming logs on every UI refresh / status ping.
     return status;
   }
 

@@ -8,6 +8,7 @@ export interface TrayCallbacks {
   onTakeScreenshot: () => void | Promise<void>;
   onTogglePause: () => void;
   onSettings: () => void;
+  onLogs: () => void;
   onReconnect: () => void;
   onGrantPermissions: () => void;
   onQuit: () => void;
@@ -55,16 +56,44 @@ function statusLabel(state: AgentUiState): string {
 
 export function createTray(callbacks: TrayCallbacks): AppTray {
   const tray = new Tray(resolveTrayIcon());
+
+  const updateTooltip = (): void => {
+    const state = callbacks.getState();
+    if (state.online) {
+      tray.setToolTip(
+        `Computer Desktop Agent\nConnected\n${state.backendUrl || "backend online"}\n${state.deviceName || state.deviceId}`
+      );
+      return;
+    }
+    if (state.connectionState === "connecting" || state.connectionState === "reconnecting") {
+      tray.setToolTip(`Computer Desktop Agent\n${statusLabel(state)}\n${state.backendUrl || ""}`.trim());
+      return;
+    }
+    tray.setToolTip("Computer Desktop Agent\nDisconnected");
+  };
+
   tray.setToolTip("Computer Desktop Agent");
   tray.on("click", () => callbacks.onOpenMain());
   tray.on("double-click", () => callbacks.onOpenMain());
 
   const updateMenu = (): void => {
+    updateTooltip();
     const state = callbacks.getState();
     const menu = Menu.buildFromTemplate([
       { label: "Computer Agent", enabled: false },
       { type: "separator" },
       { label: statusLabel(state), enabled: false },
+      ...(state.online && state.backendUrl
+        ? [
+            {
+              label:
+                state.backendUrl.length > 48
+                  ? `${state.backendUrl.slice(0, 45)}…`
+                  : state.backendUrl,
+              enabled: false,
+            } as Electron.MenuItemConstructorOptions,
+          ]
+        : []),
       {
         label: `Device ID: ${state.deviceId.slice(0, 18)}${state.deviceId.length > 18 ? "…" : ""}`,
         enabled: false,
@@ -98,6 +127,10 @@ export function createTray(callbacks: TrayCallbacks): AppTray {
       {
         label: "Settings",
         click: () => callbacks.onSettings(),
+      },
+      {
+        label: "Logs…",
+        click: () => callbacks.onLogs(),
       },
       {
         label: "Grant Permissions…",

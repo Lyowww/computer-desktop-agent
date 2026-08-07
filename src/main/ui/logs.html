@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'" />
+    <title>Logs — Computer Desktop Agent</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0b1016;
+        --fg: #e7ecf1;
+        --muted: #9aa7b5;
+        --accent: #3d8bfd;
+        --card: #121820;
+        --info: #8ec8ff;
+        --warn: #ffd27a;
+        --error: #ff8f8f;
+      }
+      * { box-sizing: border-box; }
+      html, body {
+        margin: 0;
+        height: 100%;
+        font-family: "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+        background: var(--bg);
+        color: var(--fg);
+      }
+      body {
+        display: flex;
+        flex-direction: column;
+        padding: 12px;
+        gap: 10px;
+      }
+      header {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      h1 { font-size: 16px; margin: 0; }
+      .meta { font-size: 12px; color: var(--muted); }
+      .connection-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 6px;
+        padding: 6px 10px;
+        border-radius: 999px;
+        border: 1px solid #2a3542;
+        background: #121820;
+        font-size: 12px;
+        color: var(--muted);
+        max-width: 100%;
+      }
+      .connection-pill.online {
+        border-color: #2f6b52;
+        color: #b7f0d3;
+      }
+      .connection-pill .dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: #9aa7b5;
+        flex-shrink: 0;
+      }
+      .connection-pill.online .dot { background: #5ddea8; }
+      .connection-pill .url {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--fg);
+        max-width: 420px;
+      }
+      .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+      button {
+        border: 0;
+        border-radius: 8px;
+        padding: 8px 12px;
+        background: #2a3542;
+        color: white;
+        font-weight: 600;
+        cursor: pointer;
+        font-size: 12px;
+      }
+      button.primary { background: var(--accent); }
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        align-items: center;
+      }
+      label {
+        font-size: 12px;
+        color: var(--muted);
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      select, input[type="search"] {
+        border-radius: 8px;
+        border: 1px solid #2a3542;
+        background: #0f1419;
+        color: var(--fg);
+        padding: 7px 10px;
+        font-size: 12px;
+      }
+      input[type="search"] { min-width: 180px; }
+      #logView {
+        flex: 1;
+        min-height: 0;
+        overflow: auto;
+        border: 1px solid #2a3542;
+        border-radius: 12px;
+        background: var(--card);
+        padding: 10px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 11.5px;
+        line-height: 1.45;
+      }
+      .entry { padding: 4px 0; border-bottom: 1px solid #1c2530; white-space: pre-wrap; word-break: break-word; }
+      .entry:last-child { border-bottom: 0; }
+      .ts { color: var(--muted); }
+      .INFO .lvl { color: var(--info); }
+      .WARN .lvl { color: var(--warn); }
+      .ERROR .lvl { color: var(--error); }
+      .ctx { color: #b7c4d4; opacity: 0.9; }
+      .empty { color: var(--muted); padding: 24px; text-align: center; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div>
+        <h1>Agent logs</h1>
+        <div class="meta" id="count">0 entries</div>
+        <div class="connection-pill offline" id="connectionPill">
+          <span class="dot"></span>
+          <span id="connectionText">Checking connection…</span>
+          <span class="url" id="connectionUrl" hidden></span>
+        </div>
+      </div>
+      <div class="actions">
+        <button id="copy">Copy all</button>
+        <button id="clear">Clear</button>
+        <button class="primary" id="pause">Pause</button>
+      </div>
+    </header>
+    <div class="toolbar">
+      <label>
+        Level
+        <select id="level">
+          <option value="ALL">All</option>
+          <option value="INFO">Info+</option>
+          <option value="WARN">Warn+</option>
+          <option value="ERROR">Error</option>
+        </select>
+      </label>
+      <label>
+        Search
+        <input id="search" type="search" placeholder="Filter message…" />
+      </label>
+      <label>
+        <input id="autoscroll" type="checkbox" checked />
+        Auto-scroll
+      </label>
+    </div>
+    <div id="logView"><div class="empty">Waiting for logs…</div></div>
+    <script src="./logs.js"></script>
+  </body>
+</html>

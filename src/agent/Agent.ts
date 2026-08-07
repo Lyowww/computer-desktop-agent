@@ -31,6 +31,7 @@ export type AgentUiState = {
   pairingCode: string;
   locked: boolean;
   hasDeviceToken: boolean;
+  backendUrl: string;
 };
 
 export class Agent extends EventEmitter {
@@ -172,6 +173,7 @@ export class Agent extends EventEmitter {
       pairingCode: this.pairingCode,
       locked,
       hasDeviceToken: this.hasDeviceToken,
+      backendUrl: cfg.backendUrl,
     };
   }
 
@@ -310,8 +312,22 @@ export class Agent extends EventEmitter {
         break;
       }
       case "CAPTURE_SCREEN": {
-        if (this.isDuplicate(`screen:${message.payload.requestId}`)) return;
+        if (this.isDuplicate(`screen:${message.payload.requestId}`)) {
+          log.info("Ignoring duplicate CAPTURE_SCREEN", {
+            requestId: message.payload.requestId,
+          });
+          return;
+        }
+        log.info("Received CAPTURE_SCREEN", {
+          requestId: message.payload.requestId,
+          maxWidth: message.payload.maxWidth ?? 1280,
+          taskId: message.payload.taskId,
+        });
         const emitScreenError = (error: string) => {
+          log.warn("Screenshot failed; sending SCREEN_RESULT error", {
+            requestId: message.payload.requestId,
+            error,
+          });
           this.ws.emitEvent("SCREEN_RESULT", {
             requestId: message.payload.requestId,
             taskId: message.payload.taskId,
@@ -328,10 +344,20 @@ export class Agent extends EventEmitter {
             quality: message.payload.quality,
             taskId: message.payload.taskId,
           });
-          if ("image" in result) {
+          if ("image" in result && result.image) {
+            log.info("Sending SCREEN_RESULT", {
+              requestId: result.requestId,
+              width: result.width,
+              height: result.height,
+              bytes: Math.round((result.image.length * 3) / 4),
+            });
             this.ws.emitEvent("SCREEN_RESULT", result);
           } else {
-            emitScreenError(result.error ?? "Screenshot failed");
+            const errMsg =
+              "error" in result && typeof result.error === "string"
+                ? result.error
+                : "Screenshot failed";
+            emitScreenError(errMsg);
           }
         } catch (error) {
           emitScreenError(error instanceof Error ? error.message : String(error));
@@ -339,7 +365,14 @@ export class Agent extends EventEmitter {
         break;
       }
       case "NOTIFY": {
-        if (this.isDuplicate(`notify:${message.payload.requestId}`)) return;
+        if (this.isDuplicate(`notify:${message.payload.requestId}`)) {
+          log.info("Ignoring duplicate NOTIFY", { requestId: message.payload.requestId });
+          return;
+        }
+        log.info("Received NOTIFY", {
+          requestId: message.payload.requestId,
+          title: message.payload.title,
+        });
         try {
           const delivered = await this.notify.show(message.payload);
           this.ws.emitEvent("NOTIFY_RESULT", {
@@ -347,7 +380,12 @@ export class Agent extends EventEmitter {
             success: true,
             ...delivered,
           });
+          log.info("NOTIFY delivered", { requestId: message.payload.requestId });
         } catch (error) {
+          log.warn("NOTIFY failed", {
+            requestId: message.payload.requestId,
+            error: error instanceof Error ? error.message : String(error),
+          });
           this.ws.emitEvent("NOTIFY_RESULT", {
             requestId: message.payload.requestId,
             success: false,

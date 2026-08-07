@@ -1,13 +1,15 @@
-import { ipcMain, clipboard } from "electron";
+import { ipcMain, clipboard, BrowserWindow } from "electron";
 import type { Agent } from "../agent/Agent";
 import { configService } from "../config/Config";
 import { PermissionManager } from "../permissions/PermissionManager";
-import { broadcastState } from "../main/windows";
+import { broadcastState, broadcastLog } from "../main/windows";
+import { clearLogs, getRecentLogs, onLog } from "../utils/logger";
 
 export interface IpcContext {
   getAgent: () => Agent;
   openSettings: () => void;
   openPairing: () => void;
+  openLogs: () => void;
 }
 
 export function registerIpcHandlers(ctx: IpcContext): void {
@@ -78,7 +80,27 @@ export function registerIpcHandlers(ctx: IpcContext): void {
     return true;
   });
 
-  // Push state updates to renderer windows when agent emits ui
+  ipcMain.handle("agent:openLogs", () => {
+    ctx.openLogs();
+    return true;
+  });
+
+  ipcMain.handle("agent:getLogs", () => getRecentLogs());
+
+  ipcMain.handle("agent:clearLogs", () => {
+    clearLogs();
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) {
+        win.webContents.send("agent:logsCleared");
+      }
+    }
+    return true;
+  });
+
+  onLog((entry) => {
+    broadcastLog(entry);
+  });
+
   const agent = ctx.getAgent();
   agent.on("ui", (state) => {
     broadcastState(state);

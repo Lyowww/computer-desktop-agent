@@ -7,7 +7,7 @@ import { configService } from "../config/Config";
 import { Agent } from "../agent/Agent";
 import { registerIpcHandlers } from "../ipc/handlers";
 import { createTray } from "./tray";
-import { openPairingWindow, openSettingsWindow } from "./windows";
+import { openPairingWindow, openSettingsWindow, openLogsWindow } from "./windows";
 import {
   ensurePermissionsOnStartup,
   promptPermissionsFromTray,
@@ -76,6 +76,7 @@ if (!gotLock) {
       getAgent: () => agent!,
       openSettings: () => openSettingsWindow(getUiState),
       openPairing: () => openPairingWindow(getUiState),
+      openLogs: () => openLogsWindow(),
     });
 
     await agent.start();
@@ -115,6 +116,7 @@ if (!gotLock) {
         agent!.setPaused(next);
       },
       onSettings: () => openSettingsWindow(getUiState),
+      onLogs: () => openLogsWindow(),
       onReconnect: () => agent!.reconnect(),
       onGrantPermissions: () => {
         void promptPermissionsFromTray();
@@ -171,6 +173,7 @@ function getUiState(): AgentUiState {
       pairingCode: agent?.getPairingCode() ?? "------",
       locked: false,
       hasDeviceToken: false,
+      backendUrl: configService.get().backendUrl,
     }
   );
 }

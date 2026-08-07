@@ -15,7 +15,11 @@ export interface AgentBridge {
   }) => Promise<boolean>;
   getPermissions: () => Promise<unknown>;
   openPermissionSettings: (kind: "accessibility" | "screenRecording") => Promise<boolean>;
+  openLogs: () => Promise<boolean>;
+  getLogs: () => Promise<unknown[]>;
+  clearLogs: () => Promise<boolean>;
   onState: (cb: (state: unknown) => void) => () => void;
+  onLog: (cb: (entry: unknown) => void) => () => void;
 }
 
 const bridge: AgentBridge = {
@@ -30,10 +34,18 @@ const bridge: AgentBridge = {
   setupCredentials: (payload) => ipcRenderer.invoke("agent:setupCredentials", payload),
   getPermissions: () => ipcRenderer.invoke("agent:getPermissions"),
   openPermissionSettings: (kind) => ipcRenderer.invoke("agent:openPermissionSettings", kind),
+  openLogs: () => ipcRenderer.invoke("agent:openLogs"),
+  getLogs: () => ipcRenderer.invoke("agent:getLogs"),
+  clearLogs: () => ipcRenderer.invoke("agent:clearLogs"),
   onState: (cb) => {
     const listener = (_event: Electron.IpcRendererEvent, state: unknown) => cb(state);
     ipcRenderer.on("agent:state", listener);
     return () => ipcRenderer.removeListener("agent:state", listener);
+  },
+  onLog: (cb) => {
+    const listener = (_event: Electron.IpcRendererEvent, entry: unknown) => cb(entry);
+    ipcRenderer.on("agent:log", listener);
+    return () => ipcRenderer.removeListener("agent:log", listener);
   },
 };
 

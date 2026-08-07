@@ -1,6 +1,9 @@
+import { EventEmitter } from "events";
+
 export type LogLevel = "INFO" | "WARN" | "ERROR";
 
 export interface LogEntry {
+  id: number;
   timestamp: string;
   level: LogLevel;
   message: string;
@@ -19,7 +22,14 @@ const SENSITIVE_KEYS = [
   "screenshot",
   "privateKey",
   "secret",
+  "deviceToken",
 ];
+
+const MAX_BUFFER = 500;
+let nextId = 1;
+const buffer: LogEntry[] = [];
+const bus = new EventEmitter();
+bus.setMaxListeners(50);
 
 function redact(value: unknown): unknown {
   if (Array.isArray(value)) {
@@ -37,6 +47,36 @@ function redact(value: unknown): unknown {
     return out;
   }
   return value;
+}
+
+function pushEntry(entry: LogEntry): void {
+  buffer.push(entry);
+  if (buffer.length > MAX_BUFFER) {
+    buffer.splice(0, buffer.length - MAX_BUFFER);
+  }
+  bus.emit("log", entry);
+}
+
+export function getRecentLogs(limit = MAX_BUFFER): LogEntry[] {
+  if (limit >= buffer.length) return [...buffer];
+  return buffer.slice(buffer.length - limit);
+}
+
+export function clearLogs(): void {
+  buffer.length = 0;
+  bus.emit("cleared");
+}
+
+export function onLog(
+  listener: (entry: LogEntry) => void
+): () => void {
+  bus.on("log", listener);
+  return () => bus.off("log", listener);
+}
+
+export function onLogsCleared(listener: () => void): () => void {
+  bus.on("cleared", listener);
+  return () => bus.off("cleared", listener);
 }
 
 export class Logger {
@@ -64,13 +104,21 @@ export class Logger {
 
   private write(level: LogLevel, message: string, context?: Record<string, unknown>): void {
     const entry: LogEntry = {
+      id: nextId++,
       timestamp: new Date().toISOString(),
       level,
       message: `[${this.scope}] ${message}`,
       ...(context ? { context: redact(context) as Record<string, unknown> } : {}),
     };
 
-    const line = JSON.stringify(entry);
+    pushEntry(entry);
+
+    const line = JSON.stringify({
+      timestamp: entry.timestamp,
+      level: entry.level,
+      message: entry.message,
+      ...(entry.context ? { context: entry.context } : {}),
+    });
     if (level === "ERROR") {
       console.error(line);
     } else if (level === "WARN") {
