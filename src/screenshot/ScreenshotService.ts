@@ -23,23 +23,41 @@ export class ScreenshotService {
    * Capture the primary display once. Never streams continuously.
    */
   async capture(options: ScreenshotOptions = {}): Promise<ScreenshotResult> {
-    const raw = (await screenshot({ format: "png" })) as Buffer;
-    const deflateLevel = options.quality !== undefined && options.quality < 80 ? 9 : 6;
-    const resized = resizePngBuffer(raw, options.maxWidth, deflateLevel);
+    const capturePromise = (async () => {
+      const raw = (await screenshot({ format: "png" })) as Buffer;
+      const deflateLevel = options.quality !== undefined && options.quality < 80 ? 9 : 6;
+      const resized = resizePngBuffer(raw, options.maxWidth ?? 1280, deflateLevel);
 
-    log.info("Captured screenshot", {
-      width: resized.width,
-      height: resized.height,
-      bytes: resized.buffer.length,
-      compressed: resized.compressed,
-    });
+      log.info("Captured screenshot", {
+        width: resized.width,
+        height: resized.height,
+        bytes: resized.buffer.length,
+        compressed: resized.compressed,
+      });
 
-    return {
-      width: resized.width,
-      height: resized.height,
-      format: "png",
-      imageBase64: resized.buffer.toString("base64"),
-      compressed: resized.compressed,
-    };
+      return {
+        width: resized.width,
+        height: resized.height,
+        format: "png" as const,
+        imageBase64: resized.buffer.toString("base64"),
+        compressed: resized.compressed,
+      };
+    })();
+
+    const timeoutMs = 12_000;
+    let timer: NodeJS.Timeout | null = null;
+    try {
+      return await Promise.race([
+        capturePromise,
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error("Screenshot timed out after 12s")),
+            timeoutMs
+          );
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   }
 }

@@ -138,10 +138,15 @@ export class AgentWebSocketClient extends EventEmitter {
     });
 
     this.socket.on("connect_error", (error) => {
-      log.error("Socket.IO connection error", { error: error.message || String(error) });
-      this.emit("error", error);
+      // Do not emit EventEmitter "error" — with no listener Node throws Uncaught Exception
+      // and Electron shows a fatal dialog on transient network / backend wake failures.
+      const message = error.message || String(error);
+      log.error("Socket.IO connection error", { error: message, url: this.url });
+      this.emit("connectionError", error);
       if (this.shouldReconnect && !this.intentionalClose) {
         this.scheduleReconnect();
+      } else {
+        this.setState("disconnected");
       }
     });
 

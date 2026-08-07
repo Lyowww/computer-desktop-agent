@@ -1,5 +1,6 @@
 import { execFile } from "child_process";
 import { promisify } from "util";
+import { desktopCapturer, systemPreferences } from "electron";
 import { rootLogger } from "../utils/logger";
 
 const execFileAsync = promisify(execFile);
@@ -10,27 +11,40 @@ export interface PermissionStatus {
   screenRecording: boolean;
   platform: NodeJS.Platform;
   guidance: string[];
+  /** Process name the user must enable in System Settings */
+  processLabel: string;
 }
 
 export interface PermissionAdapter {
   check(): Promise<PermissionStatus>;
+  /** Trigger OS prompts where possible, then open Settings for anything still missing. */
+  requestAll(): Promise<PermissionStatus>;
   openSystemSettings(kind: "accessibility" | "screenRecording"): Promise<void>;
+}
+
+function processLabel(): string {
+  // Dev runs as Electron; packaged builds use the product name.
+  if (process.defaultApp || /electron/i.test(process.execPath)) {
+    return "Electron";
+  }
+  return "Computer Desktop Agent";
 }
 
 class MacPermissionAdapter implements PermissionAdapter {
   async check(): Promise<PermissionStatus> {
-    const accessibility = await this.checkAccessibility();
+    const accessibility = this.checkAccessibility();
     const screenRecording = await this.checkScreenRecording();
+    const label = processLabel();
     const guidance: string[] = [];
 
     if (!accessibility) {
       guidance.push(
-        "Grant Accessibility: System Settings → Privacy & Security → Accessibility → enable Computer Desktop Agent."
+        `Grant Accessibility: System Settings → Privacy & Security → Accessibility → enable “${label}” (and leave it on).`
       );
     }
     if (!screenRecording) {
       guidance.push(
-        "Grant Screen Recording: System Settings → Privacy & Security → Screen Recording → enable Computer Desktop Agent, then restart the app."
+        `Grant Screen Recording: System Settings → Privacy & Security → Screen Recording → enable “${label}”, then quit and reopen this app.`
       );
     }
 
@@ -39,30 +53,79 @@ class MacPermissionAdapter implements PermissionAdapter {
       screenRecording,
       platform: "darwin",
       guidance,
+      processLabel: label,
     };
   }
 
+  async requestAll(): Promise<PermissionStatus> {
+    const label = processLabel();
+    log.info("Requesting macOS permissions", { processLabel: label });
+
+    // 1) Accessibility — Electron shows the system prompt when prompt=true
+    try {
+      systemPreferences.isTrustedAccessibilityClient(true);
+    } catch (error) {
+      log.warn("Accessibility prompt failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
+    // 2) Screen Recording — attempting capture triggers the TCC prompt
+    try {
+      await desktopCapturer.getSources({
+        types: ["screen"],
+        thumbnailSize: { width: 1, height: 1 },
+      });
+    } catch (error) {
+      log.warn("Screen capture prompt/trigger failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
+    // Also call CGRequestScreenCaptureAccess via JXA as a second trigger
+    try {
+      await execFileAsync(
+        "/usr/bin/osascript",
+        [
+          "-l",
+          "JavaScript",
+          "-e",
+          `
+            ObjC.import('CoreGraphics');
+            if (typeof $.CGRequestScreenCaptureAccess === 'function') {
+              $.CGRequestScreenCaptureAccess();
+            }
+          `,
+        ],
+        { timeout: 8000 }
+      );
+    } catch {
+      // ignore — Electron desktopCapturer is the primary path
+    }
+
+    // Give the user a moment if a system sheet appeared
+    await new Promise((r) => setTimeout(r, 400));
+    return this.check();
+  }
+
   async openSystemSettings(kind: "accessibility" | "screenRecording"): Promise<void> {
-    const pane =
+    // Modern macOS URLs (Ventura+)
+    const modern =
       kind === "accessibility"
         ? "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
         : "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture";
-    await execFileAsync("/usr/bin/open", [pane]);
+    try {
+      await execFileAsync("/usr/bin/open", [modern]);
+    } catch {
+      await execFileAsync("/usr/bin/open", [
+        "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension",
+      ]);
+    }
   }
 
-  private async checkAccessibility(): Promise<boolean> {
+  private checkAccessibility(): boolean {
     try {
-      // AXIsProcessTrusted via Swift/osascript bridge — best-effort without TCC bypass.
-      const script = `
-        ObjC.import('ApplicationServices');
-        ObjC.import('CoreFoundation');
-        const trusted = $.AXIsProcessTrusted();
-        trusted ? 'true' : 'false';
-      `;
-      const { stdout } = await execFileAsync("/usr/bin/osascript", ["-l", "JavaScript", "-e", script], {
-        timeout: 5000,
-      });
-      return stdout.trim() === "true";
+      return systemPreferences.isTrustedAccessibilityClient(false);
     } catch (error) {
       log.warn("Accessibility check failed", {
         error: error instanceof Error ? error.message : String(error),
@@ -73,19 +136,20 @@ class MacPermissionAdapter implements PermissionAdapter {
 
   private async checkScreenRecording(): Promise<boolean> {
     try {
-      // CGPreflightScreenCaptureAccess when available (macOS 10.15+)
-      const script = `
-        ObjC.import('CoreGraphics');
-        if (typeof $.CGPreflightScreenCaptureAccess === 'function') {
-          $.CGPreflightScreenCaptureAccess() ? 'true' : 'false';
-        } else {
-          'true';
-        }
-      `;
-      const { stdout } = await execFileAsync("/usr/bin/osascript", ["-l", "JavaScript", "-e", script], {
-        timeout: 5000,
-      });
-      return stdout.trim() === "true";
+      const status = systemPreferences.getMediaAccessStatus("screen");
+      if (status === "granted") return true;
+      if (status === "denied" || status === "restricted") return false;
+
+      // not-determined / unknown — try a tiny capture; success means granted
+      try {
+        const sources = await desktopCapturer.getSources({
+          types: ["screen"],
+          thumbnailSize: { width: 1, height: 1 },
+        });
+        return sources.length > 0;
+      } catch {
+        return false;
+      }
     } catch (error) {
       log.warn("Screen recording check failed", {
         error: error instanceof Error ? error.message : String(error),
@@ -97,13 +161,17 @@ class MacPermissionAdapter implements PermissionAdapter {
 
 class WindowsPermissionAdapter implements PermissionAdapter {
   async check(): Promise<PermissionStatus> {
-    // Windows does not gate UI automation the same way; report available.
     return {
       accessibility: true,
       screenRecording: true,
       platform: "win32",
       guidance: [],
+      processLabel: processLabel(),
     };
+  }
+
+  async requestAll(): Promise<PermissionStatus> {
+    return this.check();
   }
 
   async openSystemSettings(): Promise<void> {
@@ -114,10 +182,9 @@ class WindowsPermissionAdapter implements PermissionAdapter {
 class LinuxPermissionAdapter implements PermissionAdapter {
   async check(): Promise<PermissionStatus> {
     const guidance: string[] = [];
-    // Wayland may require portal permissions; we cannot bypass them.
     if (process.env.XDG_SESSION_TYPE === "wayland") {
       guidance.push(
-        "On Wayland, approve screen share / remote desktop portal prompts when asked. Input control may require an X11 session or compositor permissions."
+        "On Wayland, approve screen share / remote desktop portal prompts when asked."
       );
     }
     return {
@@ -125,7 +192,12 @@ class LinuxPermissionAdapter implements PermissionAdapter {
       screenRecording: true,
       platform: "linux",
       guidance,
+      processLabel: processLabel(),
     };
+  }
+
+  async requestAll(): Promise<PermissionStatus> {
+    return this.check();
   }
 
   async openSystemSettings(): Promise<void> {
@@ -156,6 +228,17 @@ export class PermissionManager {
       accessibility: status.accessibility,
       screenRecording: status.screenRecording,
       platform: status.platform,
+      processLabel: status.processLabel,
+    });
+    return status;
+  }
+
+  async requestAll(): Promise<PermissionStatus> {
+    const status = await this.adapter.requestAll();
+    log.info("Permission request finished", {
+      accessibility: status.accessibility,
+      screenRecording: status.screenRecording,
+      processLabel: status.processLabel,
     });
     return status;
   }
@@ -168,7 +251,7 @@ export class PermissionManager {
     const status = await this.getStatus();
     if (!status.accessibility) {
       throw new Error(
-        `Accessibility permission missing. ${status.guidance.join(" ")}`.trim()
+        `Accessibility permission missing for “${status.processLabel}”. ${status.guidance.join(" ")}`.trim()
       );
     }
   }
@@ -177,7 +260,7 @@ export class PermissionManager {
     const status = await this.getStatus();
     if (!status.screenRecording) {
       throw new Error(
-        `Screen Recording permission missing. ${status.guidance.join(" ")}`.trim()
+        `Screen Recording permission missing for “${status.processLabel}”. ${status.guidance.join(" ")}`.trim()
       );
     }
   }

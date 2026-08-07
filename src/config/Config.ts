@@ -5,11 +5,32 @@ import { toSocketIoUrl } from "./env";
 
 const log = rootLogger.child("config");
 
+export const DEFAULT_BACKEND_URL = "https://computer-agent-backend.onrender.com/ws";
+
+/**
+ * Early local/dev URLs (localhost, /agent) break packaged DMG installs.
+ */
+export function isBrokenBackendUrl(url: string): boolean {
+  try {
+    const normalized = toSocketIoUrl(url);
+    const parsed = new URL(normalized);
+    if (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1") {
+      return true;
+    }
+    if (parsed.pathname === "/agent" || parsed.pathname.endsWith("/agent")) {
+      return true;
+    }
+    return false;
+  } catch {
+    return true;
+  }
+}
+
 const ConfigSchema = z.object({
   backendUrl: z
     .string()
     .min(1)
-    .default("https://computer-agent-backend.onrender.com/ws")
+    .default(DEFAULT_BACKEND_URL)
     .refine((value) => {
       try {
         toSocketIoUrl(value);
@@ -73,15 +94,28 @@ export class ConfigService {
   get(): AppConfig {
     const envUrl = process.env.AGENT_BACKEND_URL;
     const envName = process.env.AGENT_DEVICE_NAME;
+    const storedUrl = this.store.store.backendUrl;
+    if (storedUrl && isBrokenBackendUrl(storedUrl) && !envUrl) {
+      log.warn("Replacing broken backendUrl from store", {
+        previous: storedUrl,
+        next: DEFAULT_BACKEND_URL,
+      });
+      this.store.set("backendUrl", DEFAULT_BACKEND_URL);
+    }
+
     const raw = {
       ...this.store.store,
       ...(envUrl ? { backendUrl: envUrl } : {}),
       ...(envName ? { deviceName: envName } : {}),
     };
     const parsed = ConfigSchema.parse(raw);
+    let backendUrl = toSocketIoUrl(parsed.backendUrl);
+    if (isBrokenBackendUrl(backendUrl) && !envUrl) {
+      backendUrl = toSocketIoUrl(DEFAULT_BACKEND_URL);
+    }
     return {
       ...parsed,
-      backendUrl: toSocketIoUrl(parsed.backendUrl),
+      backendUrl,
     };
   }
 

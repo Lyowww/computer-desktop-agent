@@ -9,10 +9,11 @@ async function load() {
   document.getElementById("deviceName").value = config.deviceName;
   document.getElementById("autoConnect").checked = config.autoConnect;
   document.getElementById("status").textContent = state.online
-    ? `Connected · ${state.deviceId}`
+    ? `Connected · ${state.deviceName} · ${state.deviceId}`
     : `Disconnected · ${state.connectionState} · ${state.deviceId}`;
 
   const lines = [
+    `Token saved: ${state.hasDeviceToken ? "yes" : "no"}`,
     `Accessibility: ${perms.accessibility ? "granted" : "missing"}`,
     `Screen Recording: ${perms.screenRecording ? "granted" : "missing"}`,
     ...(perms.guidance || []),
@@ -25,13 +26,39 @@ window.agentApi.onState(() => {
 });
 
 document.getElementById("save").addEventListener("click", async () => {
-  await window.agentApi.updateConfig({
-    backendUrl: document.getElementById("backendUrl").value.trim(),
-    deviceName: document.getElementById("deviceName").value.trim(),
-    autoConnect: document.getElementById("autoConnect").checked,
-  });
-  await window.agentApi.reconnect();
-  await load();
+  const ok = document.getElementById("credOk");
+  const err = document.getElementById("credErr");
+  ok.hidden = true;
+  err.hidden = true;
+
+  const deviceName = document.getElementById("deviceName").value.trim();
+  const deviceToken = document.getElementById("deviceToken").value.trim();
+  const backendUrl = document.getElementById("backendUrl").value.trim();
+  const autoConnect = document.getElementById("autoConnect").checked;
+
+  try {
+    await window.agentApi.updateConfig({
+      backendUrl,
+      deviceName,
+      autoConnect,
+    });
+
+    if (deviceToken) {
+      await window.agentApi.setupCredentials({ deviceName, deviceToken });
+      document.getElementById("deviceToken").value = "";
+    } else {
+      await window.agentApi.reconnect();
+    }
+
+    ok.hidden = false;
+    ok.textContent = deviceToken
+      ? "Device name + token saved. Reconnecting…"
+      : "Settings saved. Reconnecting…";
+    await load();
+  } catch (error) {
+    err.hidden = false;
+    err.textContent = error?.message || String(error);
+  }
 });
 
 document.getElementById("reconnect").addEventListener("click", async () => {

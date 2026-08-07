@@ -20,15 +20,21 @@ function htmlPath(name: string): string {
 
 export function openSettingsWindow(getState: () => AgentUiState): void {
   if (settingsWindow && !settingsWindow.isDestroyed()) {
+    if (settingsWindow.isMinimized()) settingsWindow.restore();
+    settingsWindow.show();
     settingsWindow.focus();
+    settingsWindow.webContents.send("agent:state", getState());
     return;
   }
 
   settingsWindow = new BrowserWindow({
-    width: 480,
-    height: 420,
-    resizable: false,
-    title: "Settings — Computer Desktop Agent",
+    width: 520,
+    height: 640,
+    resizable: true,
+    minWidth: 460,
+    minHeight: 560,
+    show: true,
+    title: "Computer Desktop Agent",
     webPreferences: {
       preload: preloadPath(),
       contextIsolation: true,
@@ -48,16 +54,19 @@ export function openSettingsWindow(getState: () => AgentUiState): void {
 
 export function openPairingWindow(getState: () => AgentUiState): void {
   if (pairingWindow && !pairingWindow.isDestroyed()) {
+    if (pairingWindow.isMinimized()) pairingWindow.restore();
+    pairingWindow.show();
     pairingWindow.focus();
     pairingWindow.webContents.send("agent:state", getState());
     return;
   }
 
   pairingWindow = new BrowserWindow({
-    width: 420,
-    height: 360,
+    width: 460,
+    height: 560,
     resizable: false,
-    title: "Pair Device — Computer Desktop Agent",
+    show: true,
+    title: "Setup Device — Computer Desktop Agent",
     webPreferences: {
       preload: preloadPath(),
       contextIsolation: true,

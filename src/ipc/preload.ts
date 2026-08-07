@@ -9,6 +9,10 @@ export interface AgentBridge {
   refreshPairingCode: () => Promise<string>;
   copyPairingCode: () => Promise<string>;
   setDeviceToken: (token: string) => Promise<boolean>;
+  setupCredentials: (payload: {
+    deviceName: string;
+    deviceToken: string;
+  }) => Promise<boolean>;
   getPermissions: () => Promise<unknown>;
   openPermissionSettings: (kind: "accessibility" | "screenRecording") => Promise<boolean>;
   onState: (cb: (state: unknown) => void) => () => void;
@@ -23,6 +27,7 @@ const bridge: AgentBridge = {
   refreshPairingCode: () => ipcRenderer.invoke("agent:refreshPairingCode"),
   copyPairingCode: () => ipcRenderer.invoke("agent:copyPairingCode"),
   setDeviceToken: (token) => ipcRenderer.invoke("agent:setDeviceToken", token),
+  setupCredentials: (payload) => ipcRenderer.invoke("agent:setupCredentials", payload),
   getPermissions: () => ipcRenderer.invoke("agent:getPermissions"),
   openPermissionSettings: (kind) => ipcRenderer.invoke("agent:openPermissionSettings", kind),
   onState: (cb) => {

@@ -20,21 +20,32 @@
         background: radial-gradient(1000px 500px at 90% -20%, #243247, var(--bg));
         color: var(--fg);
         min-height: 100vh;
-        padding: 24px;
+        padding: 20px;
       }
-      h1 { font-size: 18px; margin: 0 0 16px; }
+      h1 { font-size: 18px; margin: 0 0 8px; }
+      h2 { font-size: 13px; margin: 18px 0 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
       label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
-      input[type="text"] {
+      input[type="text"],
+      textarea {
         width: 100%;
         border-radius: 10px;
         border: 1px solid #2a3542;
         background: #0b1016;
         color: var(--fg);
         padding: 10px 12px;
-        margin-bottom: 14px;
+        margin-bottom: 12px;
+        font-size: 13px;
       }
-      .row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
-      .status { font-size: 13px; color: var(--muted); margin-bottom: 16px; }
+      textarea {
+        min-height: 72px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 12px;
+        resize: vertical;
+      }
+      .row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+      .status { font-size: 13px; color: var(--muted); margin-bottom: 12px; }
+      .ok { color: #5ddea8; font-size: 12px; margin-bottom: 10px; }
+      .err { color: #ff8f8f; font-size: 12px; margin-bottom: 10px; }
       button {
         border: 0;
         border-radius: 10px;
@@ -51,24 +62,35 @@
         background: color-mix(in srgb, var(--card) 92%, transparent);
         border: 1px solid #2a3542;
         border-radius: 16px;
-        padding: 20px;
+        padding: 18px;
       }
       .perms { font-size: 12px; color: var(--muted); line-height: 1.5; white-space: pre-wrap; }
+      .hint { font-size: 12px; color: var(--muted); margin: -4px 0 12px; }
     </style>
   </head>
   <body>
     <div class="card">
       <h1>Settings</h1>
       <div class="status" id="status">…</div>
+
+      <h2>Connection</h2>
       <label for="backendUrl">Backend Socket.IO URL</label>
       <input id="backendUrl" type="text" placeholder="wss://computer-agent-backend.onrender.com" />
-      <label for="deviceName">Device name</label>
-      <input id="deviceName" type="text" />
       <div class="row">
         <label for="autoConnect" style="margin:0">Auto-connect on launch</label>
         <input id="autoConnect" type="checkbox" />
       </div>
-      <button id="save">Save</button>
+
+      <h2>Device credentials</h2>
+      <p class="hint">Enter these by hand for DMG installs. Token is stored in the macOS Keychain.</p>
+      <label for="deviceName">Device name</label>
+      <input id="deviceName" type="text" placeholder="e.g. Lyova MacBook" />
+      <label for="deviceToken">Device token (paste to replace)</label>
+      <textarea id="deviceToken" placeholder="Leave blank to keep the current token" spellcheck="false"></textarea>
+      <div class="ok" id="credOk" hidden></div>
+      <div class="err" id="credErr" hidden></div>
+
+      <button id="save">Save &amp; reconnect</button>
       <button class="secondary" id="reconnect">Reconnect</button>
       <button class="secondary" id="accessibility">Open Accessibility settings</button>
       <button class="secondary" id="screen">Open Screen Recording settings</button>

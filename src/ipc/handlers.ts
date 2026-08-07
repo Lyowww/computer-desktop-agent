@@ -48,6 +48,17 @@ export function registerIpcHandlers(ctx: IpcContext): void {
     return true;
   });
 
+  ipcMain.handle(
+    "agent:setupCredentials",
+    async (_event, payload: { deviceName?: string; deviceToken?: string }) => {
+      await ctx.getAgent().setupCredentials({
+        deviceName: String(payload?.deviceName ?? ""),
+        deviceToken: String(payload?.deviceToken ?? ""),
+      });
+      return true;
+    }
+  );
+
   ipcMain.handle("agent:getPermissions", async () => {
     const manager = new PermissionManager();
     return manager.getStatus();

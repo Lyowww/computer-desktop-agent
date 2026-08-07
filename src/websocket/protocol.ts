@@ -26,10 +26,11 @@ export interface ActionResultPayload {
 export interface ScreenResultPayload {
   requestId: string;
   taskId?: string;
-  width: number;
-  height: number;
-  image: string;
+  width?: number;
+  height?: number;
+  image?: string;
   mimeType?: "image/png" | "image/jpeg" | "image/webp";
+  error?: string;
 }
 
 export interface StatusPayload {

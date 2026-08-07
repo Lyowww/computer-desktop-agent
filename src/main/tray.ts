@@ -4,10 +4,12 @@ import type { AgentUiState } from "../agent/Agent";
 
 export interface TrayCallbacks {
   getState: () => AgentUiState;
+  onOpenMain: () => void;
   onTakeScreenshot: () => void | Promise<void>;
   onTogglePause: () => void;
   onSettings: () => void;
   onReconnect: () => void;
+  onGrantPermissions: () => void;
   onQuit: () => void;
   onShowPairing: () => void;
 }
@@ -54,6 +56,8 @@ function statusLabel(state: AgentUiState): string {
 export function createTray(callbacks: TrayCallbacks): AppTray {
   const tray = new Tray(resolveTrayIcon());
   tray.setToolTip("Computer Desktop Agent");
+  tray.on("click", () => callbacks.onOpenMain());
+  tray.on("double-click", () => callbacks.onOpenMain());
 
   const updateMenu = (): void => {
     const state = callbacks.getState();
@@ -65,11 +69,20 @@ export function createTray(callbacks: TrayCallbacks): AppTray {
         label: `Device ID: ${state.deviceId.slice(0, 18)}${state.deviceId.length > 18 ? "…" : ""}`,
         enabled: false,
       },
+      {
+        label: "Open…",
+        click: () => callbacks.onOpenMain(),
+      },
       ...(state.paired || state.hasDeviceToken
-        ? []
+        ? [
+            {
+              label: "Update device credentials…",
+              click: () => callbacks.onShowPairing(),
+            } as Electron.MenuItemConstructorOptions,
+          ]
         : [
             {
-              label: "Paste device token…",
+              label: "Setup device (name + token)…",
               click: () => callbacks.onShowPairing(),
             } as Electron.MenuItemConstructorOptions,
           ]),
@@ -85,6 +98,10 @@ export function createTray(callbacks: TrayCallbacks): AppTray {
       {
         label: "Settings",
         click: () => callbacks.onSettings(),
+      },
+      {
+        label: "Grant Permissions…",
+        click: () => callbacks.onGrantPermissions(),
       },
       {
         label: "Reconnect",

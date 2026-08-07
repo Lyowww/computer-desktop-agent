@@ -27,6 +27,7 @@ export type AgentUiState = {
   paused: boolean;
   paired: boolean;
   deviceId: string;
+  deviceName: string;
   pairingCode: string;
   locked: boolean;
   hasDeviceToken: boolean;
@@ -79,6 +80,12 @@ export class Agent extends EventEmitter {
     this.ws.on("open", () => void this.onConnected());
     this.ws.on("message", (data) => void this.onMessage(data));
     this.ws.on("state", () => this.emitUi());
+    this.ws.on("connectionError", (error: Error) => {
+      log.warn("Backend unreachable; will keep retrying", {
+        error: error?.message || String(error),
+      });
+      this.emitUi();
+    });
     this.ws.on("close", () => {
       this.registered = false;
       this.emitUi();
@@ -101,8 +108,11 @@ export class Agent extends EventEmitter {
     this.emitUi();
 
     const cfg = this.config.get();
-    if (cfg.autoConnect) {
+    // Packaged installs have no .env — wait for Setup credentials before connecting.
+    if (cfg.autoConnect && this.hasDeviceToken) {
       this.connect();
+    } else if (!this.hasDeviceToken) {
+      log.info("Waiting for device token (Setup / Settings) before connecting");
     }
 
     this.statusTimer = setInterval(() => void this.publishStatus(), 30_000);
@@ -151,12 +161,14 @@ export class Agent extends EventEmitter {
   async getUiState(): Promise<AgentUiState> {
     const locked = await this.lockScreen.isLocked();
     this.hasDeviceToken = Boolean(await this.device.getDeviceToken());
+    const cfg = this.config.get();
     return {
       connectionState: this.ws.getConnectionState(),
       online: this.ws.isConnected() && this.registered,
       paused: this.paused,
       paired: this.device.isPaired() || this.hasDeviceToken,
       deviceId: this.deviceId,
+      deviceName: cfg.deviceName,
       pairingCode: this.pairingCode,
       locked,
       hasDeviceToken: this.hasDeviceToken,
@@ -184,19 +196,42 @@ export class Agent extends EventEmitter {
     this.reconnect();
   }
 
+  /**
+   * Manual setup for packaged DMG installs: typed device name + dashboard token.
+   */
+  async setupCredentials(input: { deviceName: string; deviceToken: string }): Promise<void> {
+    const deviceName = input.deviceName.trim();
+    const deviceToken = input.deviceToken.trim();
+    if (!deviceName) {
+      throw new Error("Device name is required");
+    }
+    if (deviceToken.length < 16) {
+      throw new Error("Device token looks too short. Paste the full token from the dashboard.");
+    }
+    this.config.set("deviceName", deviceName);
+    await this.device.setDeviceToken(deviceToken);
+    this.hasDeviceToken = true;
+    log.info("Saved device credentials from setup form", { deviceName });
+    this.emitUi();
+    this.reconnect();
+  }
+
   async takeLocalScreenshot(): Promise<{ width: number; height: number; imageBase64: string }> {
     const result = await this.executor.captureScreen(`local_${Date.now()}`, { maxWidth: 1280 });
-    if ("error" in result && result.status === "LOCKED") {
-      throw new Error("Computer is locked");
+    if ("success" in result) {
+      if (result.status === "LOCKED") {
+        throw new Error("Computer is locked");
+      }
+      throw new Error(result.error ?? "Screenshot failed");
     }
-    if ("image" in result) {
-      return {
-        width: result.width,
-        height: result.height,
-        imageBase64: result.image,
-      };
+    if (!result.image || result.width == null || result.height == null) {
+      throw new Error(result.error ?? "Screenshot failed");
     }
-    throw new Error(result.error ?? "Screenshot failed");
+    return {
+      width: result.width,
+      height: result.height,
+      imageBase64: result.image,
+    };
   }
 
   private async onConnected(): Promise<void> {
@@ -276,38 +311,30 @@ export class Agent extends EventEmitter {
       }
       case "CAPTURE_SCREEN": {
         if (this.isDuplicate(`screen:${message.payload.requestId}`)) return;
-        if (this.paused) {
-          this.ws.emitEvent("ACTION_RESULT", {
-            actionId: message.payload.requestId,
-            taskId: message.payload.taskId ?? message.payload.requestId,
-            success: false,
-            error: "Agent is paused",
+        const emitScreenError = (error: string) => {
+          this.ws.emitEvent("SCREEN_RESULT", {
+            requestId: message.payload.requestId,
+            taskId: message.payload.taskId,
+            error,
           });
+        };
+        if (this.paused) {
+          emitScreenError("Agent is paused");
           break;
         }
         try {
           const result = await this.executor.captureScreen(message.payload.requestId, {
-            maxWidth: message.payload.maxWidth,
+            maxWidth: message.payload.maxWidth ?? 1280,
             quality: message.payload.quality,
             taskId: message.payload.taskId,
           });
           if ("image" in result) {
             this.ws.emitEvent("SCREEN_RESULT", result);
           } else {
-            this.ws.emitEvent("ACTION_RESULT", {
-              actionId: result.actionId,
-              taskId: result.taskId,
-              success: false,
-              error: result.error,
-            });
+            emitScreenError(result.error ?? "Screenshot failed");
           }
         } catch (error) {
-          this.ws.emitEvent("ACTION_RESULT", {
-            actionId: message.payload.requestId,
-            taskId: message.payload.taskId ?? message.payload.requestId,
-            success: false,
-            error: error instanceof Error ? error.message : String(error),
-          });
+          emitScreenError(error instanceof Error ? error.message : String(error));
         }
         break;
       }

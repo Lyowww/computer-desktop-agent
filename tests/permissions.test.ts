@@ -9,6 +9,10 @@ class FakePermissionAdapter implements PermissionAdapter {
     return this.status;
   }
 
+  async requestAll(): Promise<PermissionStatus> {
+    return this.status;
+  }
+
   async openSystemSettings(): Promise<void> {
     // no-op
   }
@@ -21,8 +25,9 @@ describe("permission detection", () => {
         accessibility: false,
         screenRecording: true,
         platform: "darwin",
+        processLabel: "Electron",
         guidance: [
-          "Grant Accessibility: System Settings → Privacy & Security → Accessibility → enable Computer Desktop Agent.",
+          "Grant Accessibility: System Settings → Privacy & Security → Accessibility → enable Electron.",
         ],
       })
     );
@@ -40,6 +45,7 @@ describe("permission detection", () => {
         accessibility: true,
         screenRecording: true,
         platform: "darwin",
+        processLabel: "Electron",
         guidance: [],
       })
     );

@@ -68,15 +68,17 @@ AGENT_DEVICE_NAME=My-MacBook
 
 ## Pairing / device token
 
-The web dashboard creates devices and shows a **one-time device token**.
+For the packaged **DMG** app, enter credentials by hand:
 
 1. Open the dashboard → **Devices → Add device**
-2. Copy the `deviceToken` (shown once)
-3. Either:
-   - Paste it into the desktop agent **Connect** window, or
-   - Set `AGENT_DEVICE_TOKEN=...` in `.env` and restart
+2. Copy the one-time `deviceToken`
+3. In the desktop app, use **Setup device (name + token)…** (or **Settings**)
+4. Type a **device name** and paste the **device token**
+5. Click **Save & connect**
 
-The agent connects with Socket.IO to `{backend}/ws?channel=desktop-agent` and emits `REGISTER_DEVICE`.
+The token is stored in the OS keychain. No `.env` file is required for DMG installs.
+
+Optional local-dev overrides:
 
 ```env
 AGENT_BACKEND_URL=wss://computer-agent-backend.onrender.com
