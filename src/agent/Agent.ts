@@ -8,6 +8,7 @@ import { PermissionManager } from "../permissions/PermissionManager";
 import { LockScreenDetector } from "../security/LockScreenDetector";
 import { NotifyService } from "../automation/system/NotifyService";
 import { SystemInfoService } from "../automation/system/SystemInfoService";
+import { ApplicationService } from "../automation/applications/ApplicationService";
 import { ConfigService, configService } from "../config/Config";
 import { ServerMessageSchema, normalizeIncomingMessage } from "../utils/validation";
 import { rootLogger } from "../utils/logger";
@@ -42,6 +43,7 @@ export class Agent extends EventEmitter {
   private readonly lockScreen: LockScreenDetector;
   private readonly notify: NotifyService;
   private readonly systemInfo: SystemInfoService;
+  private readonly apps: ApplicationService;
   private readonly config: ConfigService;
   private statusTimer: NodeJS.Timeout | null = null;
   private pingTimer: NodeJS.Timeout | null = null;
@@ -76,6 +78,7 @@ export class Agent extends EventEmitter {
     this.lockScreen = deps?.lockScreen ?? new LockScreenDetector();
     this.notify = new NotifyService();
     this.systemInfo = new SystemInfoService();
+    this.apps = new ApplicationService();
     this.paused = cfg.paused;
 
     this.ws.on("open", () => void this.onConnected());
@@ -287,7 +290,9 @@ export class Agent extends EventEmitter {
         rawEvent === "CAPTURE_SCREEN" ||
         rawEvent === "EXECUTE_ACTION" ||
         rawEvent === "LIST_PROCESSES" ||
-        rawEvent === "LIST_APPS"
+        rawEvent === "LIST_APPS" ||
+        rawEvent === "OPEN_APP" ||
+        rawEvent === "CLOSE_APP"
       ) {
         log.warn("Dropped inbound command (no usable payload)", {
           event: rawEvent,
@@ -450,6 +455,39 @@ export class Agent extends EventEmitter {
           this.ws.emitEvent("APPS_RESULT", {
             requestId: message.payload.requestId,
             apps: [],
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+        break;
+      }
+      case "OPEN_APP":
+      case "CLOSE_APP": {
+        if (this.isDuplicate(`app:${message.event}:${message.payload.requestId}`)) return;
+        const action = message.event === "OPEN_APP" ? "open" : "close";
+        log.info(`Received ${message.event}`, {
+          requestId: message.payload.requestId,
+          app: message.payload.app,
+        });
+        try {
+          if (this.paused) {
+            throw new Error("Agent is paused");
+          }
+          const result =
+            action === "open"
+              ? await this.apps.openApp(message.payload.app)
+              : await this.apps.closeApp(message.payload.app);
+          this.ws.emitEvent("APP_ACTION_RESULT", {
+            requestId: message.payload.requestId,
+            action,
+            app: result.app,
+            success: true,
+          });
+        } catch (error) {
+          this.ws.emitEvent("APP_ACTION_RESULT", {
+            requestId: message.payload.requestId,
+            action,
+            app: message.payload.app,
+            success: false,
             error: error instanceof Error ? error.message : String(error),
           });
         }

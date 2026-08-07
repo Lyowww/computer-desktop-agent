@@ -108,6 +108,8 @@ export function resolveAllowedApp(name: string): AllowedApp | null {
 
 export interface ApplicationLauncherAdapter {
   open(app: AllowedApp): Promise<void>;
+  openByName(name: string): Promise<void>;
+  closeByName(name: string): Promise<void>;
 }
 
 class MacApplicationLauncher implements ApplicationLauncherAdapter {
@@ -125,6 +127,20 @@ class MacApplicationLauncher implements ApplicationLauncherAdapter {
       return;
     }
     throw new Error(`Unsupported macOS resolution for ${app}`);
+  }
+
+  async openByName(name: string): Promise<void> {
+    await execFileAsync("/usr/bin/open", ["-a", name], { timeout: 15_000 });
+  }
+
+  async closeByName(name: string): Promise<void> {
+    // AppleScript string is single-quoted; escape embedded quotes.
+    const escaped = name.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+    await execFileAsync(
+      "/usr/bin/osascript",
+      ["-e", `tell application "${escaped}" to quit`],
+      { timeout: 15_000 }
+    );
   }
 }
 
@@ -153,6 +169,26 @@ class WindowsApplicationLauncher implements ApplicationLauncherAdapter {
     }
     throw new Error(`Unsupported Windows resolution for ${app}`);
   }
+
+  async openByName(name: string): Promise<void> {
+    await execFileAsync(
+      "powershell.exe",
+      ["-NoProfile", "-Command", `Start-Process -FilePath ${JSON.stringify(name)}`],
+      { timeout: 15_000, windowsHide: true }
+    );
+  }
+
+  async closeByName(name: string): Promise<void> {
+    await execFileAsync(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-Command",
+        `Get-Process -Name ${JSON.stringify(name)} -ErrorAction SilentlyContinue | Stop-Process`,
+      ],
+      { timeout: 15_000, windowsHide: true }
+    );
+  }
 }
 
 class LinuxApplicationLauncher implements ApplicationLauncherAdapter {
@@ -166,6 +202,14 @@ class LinuxApplicationLauncher implements ApplicationLauncherAdapter {
       return;
     }
     throw new Error(`Unsupported Linux resolution for ${app}`);
+  }
+
+  async openByName(name: string): Promise<void> {
+    await execFileAsync(name, [], { timeout: 15_000 });
+  }
+
+  async closeByName(name: string): Promise<void> {
+    await execFileAsync("pkill", ["-x", name], { timeout: 15_000 });
   }
 }
 
@@ -182,15 +226,34 @@ export class ApplicationService {
     this.launcher = launcher;
   }
 
-  async openApp(name: string): Promise<{ app: AllowedApp }> {
-    const allowed = resolveAllowedApp(name);
-    if (!allowed) {
-      throw new Error(
-        `Application "${name}" is not in the allowlist. Allowed: ${ALLOWED_APPS.join(", ")}`
-      );
+  private assertSafeAppName(name: string): string {
+    const trimmed = name.trim();
+    if (!/^[A-Za-z0-9][A-Za-z0-9 _.'()-]*$/.test(trimmed)) {
+      throw new Error(`Invalid application name: ${name}`);
     }
-    await this.launcher.open(allowed);
-    log.info("Opened application", { app: allowed });
-    return { app: allowed };
+    if (trimmed.length > 256) {
+      throw new Error("Application name too long");
+    }
+    return trimmed;
+  }
+
+  async openApp(name: string): Promise<{ app: string }> {
+    const allowed = resolveAllowedApp(name);
+    if (allowed) {
+      await this.launcher.open(allowed);
+      log.info("Opened application", { app: allowed });
+      return { app: allowed };
+    }
+    const safe = this.assertSafeAppName(name);
+    await this.launcher.openByName(safe);
+    log.info("Opened application by name", { app: safe });
+    return { app: safe };
+  }
+
+  async closeApp(name: string): Promise<{ app: string }> {
+    const safe = this.assertSafeAppName(name);
+    await this.launcher.closeByName(safe);
+    log.info("Closed application", { app: safe });
+    return { app: safe };
   }
 }

@@ -190,6 +190,30 @@ export const ListAppsMessageSchema = z.object({
   }),
 });
 
+export const OpenAppMessageSchema = z.object({
+  event: z.literal("OPEN_APP"),
+  payload: z.object({
+    requestId: z.string().min(1),
+    app: z
+      .string()
+      .min(1)
+      .max(256)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9 _.'()-]*$/, "Invalid application name"),
+  }),
+});
+
+export const CloseAppMessageSchema = z.object({
+  event: z.literal("CLOSE_APP"),
+  payload: z.object({
+    requestId: z.string().min(1),
+    app: z
+      .string()
+      .min(1)
+      .max(256)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9 _.'()-]*$/, "Invalid application name"),
+  }),
+});
+
 /** Events the desktop agent intentionally handles. */
 export const ServerMessageSchema = z.discriminatedUnion("event", [
   ExecuteActionMessageSchema,
@@ -197,6 +221,8 @@ export const ServerMessageSchema = z.discriminatedUnion("event", [
   NotifyMessageSchema,
   ListProcessesMessageSchema,
   ListAppsMessageSchema,
+  OpenAppMessageSchema,
+  CloseAppMessageSchema,
   z.object({
     event: z.literal("DEVICE_REGISTERED"),
     payload: z.object({
@@ -256,6 +282,7 @@ export const IGNORED_SERVER_EVENTS = new Set([
   "PROCESSES_RESULT",
   "APPS_RESULT",
   "NOTIFY_RESULT",
+  "APP_ACTION_RESULT",
 ]);
 
 export type ExecuteActionPayload = z.infer<typeof ExecuteActionPayloadSchema>;
@@ -316,6 +343,8 @@ const COMMAND_EVENTS_REQUIRING_PAYLOAD = new Set([
   "NOTIFY",
   "LIST_PROCESSES",
   "LIST_APPS",
+  "OPEN_APP",
+  "CLOSE_APP",
 ]);
 
 /**
