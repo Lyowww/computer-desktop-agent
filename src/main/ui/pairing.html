@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'" />
+    <title>Pair Device</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #0f1419;
+        --fg: #e7ecf1;
+        --muted: #9aa7b5;
+        --accent: #3d8bfd;
+        --card: #1a222c;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+        background: radial-gradient(1200px 600px at 10% -10%, #1d2a3a, var(--bg));
+        color: var(--fg);
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+      }
+      .panel {
+        width: 100%;
+        max-width: 360px;
+        background: color-mix(in srgb, var(--card) 92%, transparent);
+        border: 1px solid #2a3542;
+        border-radius: 16px;
+        padding: 24px;
+      }
+      h1 { font-size: 18px; margin: 0 0 8px; }
+      p { margin: 0 0 16px; color: var(--muted); font-size: 13px; line-height: 1.45; }
+      .code {
+        font-size: 40px;
+        letter-spacing: 0.28em;
+        font-weight: 650;
+        text-align: center;
+        padding: 18px 8px 18px 18px;
+        background: #0b1016;
+        border-radius: 12px;
+        margin-bottom: 16px;
+        font-variant-numeric: tabular-nums;
+      }
+      .meta { font-size: 12px; color: var(--muted); margin-bottom: 16px; word-break: break-all; }
+      .row { display: flex; gap: 8px; }
+      button {
+        flex: 1;
+        border: 0;
+        border-radius: 10px;
+        padding: 10px 12px;
+        background: var(--accent);
+        color: white;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      button.secondary { background: #2a3542; }
+    </style>
+  </head>
+  <body>
+    <div class="panel">
+      <h1>Pair this device</h1>
+      <p>Enter this code in the Computer Agent dashboard to securely link this machine. Credentials are stored in the OS keychain.</p>
+      <div class="code" id="code">------</div>
+      <div class="meta" id="deviceId">Device ID: …</div>
+      <div class="row">
+        <button id="copy">Copy code</button>
+        <button class="secondary" id="refresh">New code</button>
+      </div>
+    </div>
+    <script src="./pairing.js"></script>
+  </body>
+</html>

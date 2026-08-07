@@ -1,0 +1,100 @@
+{
+  "name": "computer-desktop-agent",
+  "version": "1.0.0",
+  "description": "Secure desktop agent that connects to the Computer Agent Backend and executes validated local OS actions.",
+  "main": "dist/main/index.js",
+  "author": "PETAI",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "build": "tsc && npm run copy:assets",
+    "copy:assets": "node scripts/copy-assets.js",
+    "dev": "npm run build && concurrently -k \"tsc -w --preserveWatchOutput\" \"wait-on dist/main/index.js && electron .\"",
+    "start": "npm run build && electron .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc --noEmit",
+    "pack": "npm run build && electron-builder --dir",
+    "dist": "npm run build && electron-builder",
+    "dist:mac": "npm run build && electron-builder --mac",
+    "dist:win": "npm run build && electron-builder --win",
+    "dist:linux": "npm run build && electron-builder --linux"
+  },
+  "dependencies": {
+    "@nut-tree-fork/nut-js": "^4.2.6",
+    "electron-store": "^8.2.0",
+    "keytar": "^7.9.0",
+    "pngjs": "^7.0.0",
+    "screenshot-desktop": "^1.15.1",
+    "uuid": "^11.1.0",
+    "ws": "^8.18.1",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "@types/pngjs": "^6.0.5",
+    "@types/screenshot-desktop": "^1.12.3",
+    "@types/ws": "^8.18.0",
+    "concurrently": "^9.1.2",
+    "electron": "^34.3.0",
+    "electron-builder": "^25.1.8",
+    "typescript": "^5.8.2",
+    "vitest": "^3.0.8",
+    "wait-on": "^8.0.2"
+  },
+  "build": {
+    "appId": "com.petai.computer-desktop-agent",
+    "productName": "Computer Desktop Agent",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "assets",
+        "to": "assets",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.utilities",
+      "target": [
+        "dmg"
+      ],
+      "hardenedRuntime": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "extendInfo": {
+        "NSAppleEventsUsageDescription": "Computer Desktop Agent needs Apple Events to open applications.",
+        "NSAccessibilityUsageDescription": "Computer Desktop Agent needs Accessibility permission to control the mouse and keyboard.",
+        "NSScreenCaptureUsageDescription": "Computer Desktop Agent needs Screen Recording permission to capture screenshots."
+      }
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Utility"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}

@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'" />
+    <title>Settings</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #0f1419;
+        --fg: #e7ecf1;
+        --muted: #9aa7b5;
+        --accent: #3d8bfd;
+        --card: #1a222c;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+        background: radial-gradient(1000px 500px at 90% -20%, #243247, var(--bg));
+        color: var(--fg);
+        min-height: 100vh;
+        padding: 24px;
+      }
+      h1 { font-size: 18px; margin: 0 0 16px; }
+      label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+      input[type="text"] {
+        width: 100%;
+        border-radius: 10px;
+        border: 1px solid #2a3542;
+        background: #0b1016;
+        color: var(--fg);
+        padding: 10px 12px;
+        margin-bottom: 14px;
+      }
+      .row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+      .status { font-size: 13px; color: var(--muted); margin-bottom: 16px; }
+      button {
+        border: 0;
+        border-radius: 10px;
+        padding: 10px 12px;
+        background: var(--accent);
+        color: white;
+        font-weight: 600;
+        cursor: pointer;
+        margin-right: 8px;
+        margin-bottom: 8px;
+      }
+      button.secondary { background: #2a3542; }
+      .card {
+        background: color-mix(in srgb, var(--card) 92%, transparent);
+        border: 1px solid #2a3542;
+        border-radius: 16px;
+        padding: 20px;
+      }
+      .perms { font-size: 12px; color: var(--muted); line-height: 1.5; white-space: pre-wrap; }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>Settings</h1>
+      <div class="status" id="status">…</div>
+      <label for="backendUrl">Backend WebSocket URL</label>
+      <input id="backendUrl" type="text" placeholder="ws://localhost:8080/agent" />
+      <label for="deviceName">Device name</label>
+      <input id="deviceName" type="text" />
+      <div class="row">
+        <label for="autoConnect" style="margin:0">Auto-connect on launch</label>
+        <input id="autoConnect" type="checkbox" />
+      </div>
+      <button id="save">Save</button>
+      <button class="secondary" id="reconnect">Reconnect</button>
+      <button class="secondary" id="accessibility">Open Accessibility settings</button>
+      <button class="secondary" id="screen">Open Screen Recording settings</button>
+      <div class="perms" id="perms"></div>
+    </div>
+    <script src="./settings.js"></script>
+  </body>
+</html>
