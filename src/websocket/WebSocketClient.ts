@@ -151,11 +151,7 @@ export class AgentWebSocketClient extends EventEmitter {
     });
 
     // Named events from backend
-    const forward = (event: string) => (payload: unknown) => {
-      this.emit("message", { event, payload });
-    };
-
-    for (const event of [
+    const known = new Set([
       "DEVICE_REGISTERED",
       "EXECUTE_ACTION",
       "CAPTURE_SCREEN",
@@ -168,9 +164,23 @@ export class AgentWebSocketClient extends EventEmitter {
       "PAUSE",
       "RESUME",
       "ACK",
-    ]) {
+      "message",
+    ]);
+
+    const forward = (event: string) => (payload: unknown) => {
+      this.emit("message", { event, payload });
+    };
+
+    for (const event of known) {
+      if (event === "message") continue;
       this.socket.on(event, forward(event));
     }
+
+    // Surface unexpected inbound events in Logs (helps diagnose routing gaps).
+    this.socket.onAny((event: string) => {
+      if (known.has(event) || event === "connect" || event === "disconnect") return;
+      log.info("Socket inbound (unhandled name)", { event });
+    });
 
     // Envelope form also emitted by ConnectionRegistry
     this.socket.on("message", (envelope: unknown) => {
