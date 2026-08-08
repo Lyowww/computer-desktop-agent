@@ -1,6 +1,6 @@
-import { execFile } from "child_process";
+import { execFile, spawn, type ChildProcess } from "child_process";
 import { promisify } from "util";
-import { keyboard, Key, mouse, Button, Point } from "@nut-tree-fork/nut-js";
+import { keyboard, Key, mouse, Button, Point, screen } from "@nut-tree-fork/nut-js";
 import { SecureStorage } from "./SecureStorage";
 import { LockScreenDetector } from "./LockScreenDetector";
 import { PermissionManager } from "../permissions/PermissionManager";
@@ -20,9 +20,8 @@ export type UnlockAttemptResult =
   | { ok: false; reason: "NO_PASSWORD" | "STILL_LOCKED" | "PERMISSION" | "ERROR"; error?: string };
 
 /**
- * Optional user-configured unlock: wakes the lock screen and types the
- * Keychain-stored password. Does not bypass OS auth — it uses the same
- * password entry path a human would, via Accessibility.
+ * Optional user-configured unlock: wakes a black/asleep display, shows the
+ * lock password field, and types the Keychain-stored password.
  */
 export class UnlockService {
   constructor(
@@ -80,11 +79,7 @@ export class UnlockService {
     }
 
     if (platform === "win32") {
-      await execFileAsync(
-        "rundll32.exe",
-        ["user32.dll,LockWorkStation"],
-        { timeout: 5000 }
-      );
+      await execFileAsync("rundll32.exe", ["user32.dll,LockWorkStation"], { timeout: 5000 });
       log.info("Requested Windows lock screen");
       return;
     }
@@ -113,11 +108,11 @@ export class UnlockService {
   }
 
   /**
-   * If the desktop is locked and a password is configured, wake the lock UI,
-   * type the password, and press Enter. No-ops when already unlocked.
+   * If the desktop is locked and a password is configured, wake the display,
+   * show the password field, type the password, and press Enter.
    */
   async ensureUnlocked(options: { timeoutMs?: number } = {}): Promise<UnlockAttemptResult> {
-    const timeoutMs = options.timeoutMs ?? 12_000;
+    const timeoutMs = options.timeoutMs ?? 20_000;
 
     if (!(await this.lockScreen.isLocked())) {
       return { ok: true, alreadyUnlocked: true };
@@ -138,6 +133,7 @@ export class UnlockService {
       };
     }
 
+    const keepAwake = this.startKeepAwake(45);
     try {
       await this.attemptUnlock(password);
       const deadline = Date.now() + timeoutMs;
@@ -153,41 +149,155 @@ export class UnlockService {
       const message = error instanceof Error ? error.message : String(error);
       log.warn("Unlock attempt failed", { error: message });
       return { ok: false, reason: "ERROR", error: message };
+    } finally {
+      keepAwake.stop();
     }
   }
 
-  private async attemptUnlock(password: string): Promise<void> {
-    keyboard.config.autoDelayMs = 25;
+  private startKeepAwake(seconds: number): { stop: () => void } {
+    if (process.platform !== "darwin") {
+      return { stop() {} };
+    }
 
-    // Wake display / dismiss the lock cover so the password field appears.
-    await this.nudgeLockUi();
-    await sleep(450);
-    await this.nudgeLockUi();
-    await sleep(350);
+    let child: ChildProcess | null = null;
+    try {
+      // -u wakes a black/asleep display; -d keeps it from sleeping mid-typing.
+      child = spawn("caffeinate", ["-dimsu", "-t", String(seconds)], {
+        stdio: "ignore",
+        detached: false,
+      });
+      child.unref?.();
+      log.info("Started display wake / keep-awake", { seconds });
+    } catch (error) {
+      log.warn("Could not start caffeinate", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
 
-    // Clear any partial input, then type password + Enter.
-    await keyboard.pressKey(Key.Escape);
-    await keyboard.releaseKey(Key.Escape);
-    await sleep(200);
-
-    await keyboard.type(password);
-    await sleep(120);
-    await keyboard.pressKey(Key.Enter);
-    await keyboard.releaseKey(Key.Enter);
+    return {
+      stop() {
+        if (!child || child.killed) return;
+        try {
+          child.kill("SIGTERM");
+        } catch {
+          // ignore
+        }
+      },
+    };
   }
 
-  private async nudgeLockUi(): Promise<void> {
-    try {
-      await mouse.setPosition(new Point(40, 40));
-      await mouse.click(Button.LEFT);
-    } catch {
-      // Mouse may be unavailable on some lock screens; key nudge is enough.
+  /** Force the panel on even when the Mac shows a black/asleep display. */
+  private async wakeDisplay(): Promise<void> {
+    if (process.platform === "darwin") {
+      try {
+        // Declares user activity → wakes display from black/sleep.
+        await execFileAsync("caffeinate", ["-u", "-t", "5"], { timeout: 8000 });
+      } catch (error) {
+        log.warn("caffeinate -u wake failed", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+      await sleep(900);
     }
+
+    // Physical mouse motion also wakes most displays.
     try {
-      await keyboard.pressKey(Key.Space);
-      await keyboard.releaseKey(Key.Space);
+      const width = await screen.width();
+      const height = await screen.height();
+      mouse.config.autoDelayMs = 0;
+      await mouse.setPosition(new Point(Math.floor(width / 2), Math.floor(height / 2)));
+      await sleep(120);
+      await mouse.setPosition(new Point(Math.floor(width / 2) + 12, Math.floor(height / 2) + 8));
     } catch {
       // ignore
     }
+  }
+
+  /**
+   * macOS lock UI often eats the first keystrokes to dismiss the clock cover.
+   * Reveal the password field first, then type.
+   */
+  private async revealPasswordField(): Promise<void> {
+    try {
+      const width = await screen.width();
+      const height = await screen.height();
+      // Password field sits near horizontal center, lower-middle of the lock UI.
+      const x = Math.floor(width / 2);
+      const y = Math.floor(height * 0.62);
+      mouse.config.autoDelayMs = 0;
+      await mouse.setPosition(new Point(x, y));
+      await sleep(200);
+      await mouse.click(Button.LEFT);
+      await sleep(350);
+      await mouse.click(Button.LEFT);
+    } catch {
+      // Fall through to key reveal.
+    }
+
+    // One throwaway key that macOS consumes to show / focus the password field.
+    // Do NOT leave Escape/Space in the buffer as password characters.
+    try {
+      keyboard.config.autoDelayMs = 0;
+      await keyboard.pressKey(Key.Return);
+      await keyboard.releaseKey(Key.Return);
+    } catch {
+      // ignore
+    }
+    await sleep(500);
+  }
+
+  private async attemptUnlock(password: string): Promise<void> {
+    log.info("Unlock sequence starting", { passwordLength: password.length });
+
+    await this.wakeDisplay();
+    await sleep(700);
+    await this.revealPasswordField();
+    await sleep(400);
+
+    // Type slowly so lockwindow / Secure Input does not drop characters.
+    await this.typePasswordReliably(password);
+    await sleep(200);
+
+    keyboard.config.autoDelayMs = 0;
+    await keyboard.pressKey(Key.Return);
+    await keyboard.releaseKey(Key.Return);
+    log.info("Unlock password submitted");
+  }
+
+  private async typePasswordReliably(password: string): Promise<void> {
+    // Prefer System Events — more reliable against loginwindow than fast CGEvent bursts.
+    if (process.platform === "darwin") {
+      try {
+        await this.typeViaSystemEvents(password);
+        return;
+      } catch (error) {
+        log.warn("System Events keystroke failed; falling back to nut.js", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    keyboard.config.autoDelayMs = 55;
+    for (const ch of password) {
+      await keyboard.type(ch);
+      await sleep(35);
+    }
+    keyboard.config.autoDelayMs = 0;
+  }
+
+  private async typeViaSystemEvents(text: string): Promise<void> {
+    const escaped = text.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+    await execFileAsync(
+      "osascript",
+      [
+        "-e",
+        'tell application "System Events"',
+        "-e",
+        `keystroke "${escaped}"`,
+        "-e",
+        "end tell",
+      ],
+      { timeout: 20_000 }
+    );
   }
 }
