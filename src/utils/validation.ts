@@ -216,6 +216,20 @@ export const CloseAppMessageSchema = z.object({
   }),
 });
 
+export const LockScreenMessageSchema = z.object({
+  event: z.literal("LOCK_SCREEN"),
+  payload: z.object({
+    requestId: z.string().min(1),
+  }),
+});
+
+export const UnlockScreenMessageSchema = z.object({
+  event: z.literal("UNLOCK_SCREEN"),
+  payload: z.object({
+    requestId: z.string().min(1),
+  }),
+});
+
 /** Events the desktop agent intentionally handles. */
 export const ServerMessageSchema = z.discriminatedUnion("event", [
   ExecuteActionMessageSchema,
@@ -225,6 +239,8 @@ export const ServerMessageSchema = z.discriminatedUnion("event", [
   ListAppsMessageSchema,
   OpenAppMessageSchema,
   CloseAppMessageSchema,
+  LockScreenMessageSchema,
+  UnlockScreenMessageSchema,
   z.object({
     event: z.literal("DEVICE_REGISTERED"),
     payload: z.object({
@@ -285,6 +301,7 @@ export const IGNORED_SERVER_EVENTS = new Set([
   "APPS_RESULT",
   "NOTIFY_RESULT",
   "APP_ACTION_RESULT",
+  "LOCK_RESULT",
 ]);
 
 export type ExecuteActionPayload = z.infer<typeof ExecuteActionPayloadSchema>;
@@ -349,6 +366,8 @@ const COMMAND_EVENTS_REQUIRING_PAYLOAD = new Set([
   "LIST_APPS",
   "OPEN_APP",
   "CLOSE_APP",
+  "LOCK_SCREEN",
+  "UNLOCK_SCREEN",
 ]);
 
 /**

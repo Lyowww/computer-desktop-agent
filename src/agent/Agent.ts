@@ -308,7 +308,9 @@ export class Agent extends EventEmitter {
         rawEvent === "LIST_PROCESSES" ||
         rawEvent === "LIST_APPS" ||
         rawEvent === "OPEN_APP" ||
-        rawEvent === "CLOSE_APP"
+        rawEvent === "CLOSE_APP" ||
+        rawEvent === "LOCK_SCREEN" ||
+        rawEvent === "UNLOCK_SCREEN"
       ) {
         log.warn("Dropped inbound command (no usable payload)", {
           event: rawEvent,
@@ -503,6 +505,55 @@ export class Agent extends EventEmitter {
             requestId: message.payload.requestId,
             action,
             app: message.payload.app,
+            success: false,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+        break;
+      }
+      case "LOCK_SCREEN":
+      case "UNLOCK_SCREEN": {
+        if (this.isDuplicate(`lock:${message.event}:${message.payload.requestId}`)) return;
+        const action = message.event === "LOCK_SCREEN" ? "lock" : "unlock";
+        log.info(`Received ${message.event}`, {
+          requestId: message.payload.requestId,
+        });
+        try {
+          if (this.paused) {
+            throw new Error("Agent is paused");
+          }
+          if (action === "lock") {
+            await this.unlock.openLockScreen();
+            this.ws.emitEvent("LOCK_RESULT", {
+              requestId: message.payload.requestId,
+              action,
+              success: true,
+            });
+          } else {
+            const attempt = await this.unlock.ensureUnlocked();
+            if (!attempt.ok) {
+              this.ws.emitEvent("LOCK_RESULT", {
+                requestId: message.payload.requestId,
+                action,
+                success: false,
+                error:
+                  attempt.reason === "NO_PASSWORD"
+                    ? "No unlock password configured in desktop Settings"
+                    : attempt.error ?? `Unlock failed (${attempt.reason.toLowerCase()})`,
+              });
+            } else {
+              this.ws.emitEvent("LOCK_RESULT", {
+                requestId: message.payload.requestId,
+                action,
+                success: true,
+                alreadyUnlocked: Boolean(attempt.alreadyUnlocked),
+              });
+            }
+          }
+        } catch (error) {
+          this.ws.emitEvent("LOCK_RESULT", {
+            requestId: message.payload.requestId,
+            action,
             success: false,
             error: error instanceof Error ? error.message : String(error),
           });
