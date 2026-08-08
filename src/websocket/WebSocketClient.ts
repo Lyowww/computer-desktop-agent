@@ -202,7 +202,17 @@ export class AgentWebSocketClient extends EventEmitter {
       };
     };
 
-    const forward = (event: string) => (payload: unknown) => {
+    const recentNamed = new Map<string, number>();
+    const namedDedupeKey = (event: string, payload: unknown): string | null => {
+      if (!payload || typeof payload !== "object") return null;
+      const requestId = (payload as { requestId?: unknown }).requestId;
+      if (typeof requestId !== "string" || !requestId) return null;
+      return `${event}:${requestId}`;
+    };
+
+    const forwardNamed = (event: string) => (payload: unknown) => {
+      const key = namedDedupeKey(event, payload);
+      if (key) recentNamed.set(key, Date.now());
       if (commandEvents.has(event)) {
         log.info("Socket inbound", { event, via: "named", ...payloadSummary(payload) });
       }
@@ -211,7 +221,7 @@ export class AgentWebSocketClient extends EventEmitter {
 
     for (const event of known) {
       if (event === "message") continue;
-      this.socket.on(event, forward(event));
+      this.socket.on(event, forwardNamed(event));
     }
 
     // Surface unexpected inbound events in Logs (helps diagnose routing gaps).
@@ -224,7 +234,8 @@ export class AgentWebSocketClient extends EventEmitter {
       });
     });
 
-    // Envelope form also emitted by ConnectionRegistry
+    // Envelope form also emitted by ConnectionRegistry — skip if we already
+    // handled the same command as a named event (prevents false duplicates).
     this.socket.on("message", (envelope: unknown) => {
       if (
         envelope &&
@@ -233,11 +244,23 @@ export class AgentWebSocketClient extends EventEmitter {
         typeof (envelope as { event: unknown }).event === "string"
       ) {
         const env = envelope as { event: string; payload?: unknown; data?: unknown };
+        const payload = env.payload ?? env.data;
+        const key = namedDedupeKey(env.event, payload);
+        if (key) {
+          const seenAt = recentNamed.get(key);
+          if (seenAt && Date.now() - seenAt < 2500) {
+            log.info("Socket inbound envelope skipped (already handled as named)", {
+              event: env.event,
+              requestId: key.slice(key.indexOf(":") + 1),
+            });
+            return;
+          }
+        }
         if (commandEvents.has(env.event)) {
           log.info("Socket inbound", {
             event: env.event,
             via: "envelope",
-            ...payloadSummary(env.payload ?? env.data),
+            ...payloadSummary(payload),
           });
         }
         this.emit("message", envelope);

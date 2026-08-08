@@ -1,3 +1,4 @@
+import path from "path";
 import { BrowserWindow, session, systemPreferences, app } from "electron";
 import { rootLogger } from "../utils/logger";
 
@@ -17,58 +18,15 @@ export interface CameraCaptureResult {
   imageBase64: string;
 }
 
-const CAPTURE_HTML = `<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8" /></head>
-<body style="margin:0;background:#111;color:#fff;font:14px -apple-system,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh">
-<video id="v" autoplay playsinline muted style="max-width:100%;max-height:100%"></video>
-<p id="msg" style="position:absolute;bottom:8px;left:8px;right:8px;margin:0;opacity:.7;font-size:12px">Requesting camera…</p>
-<script>
-window.__captureFrontCamera = async function(quality, maxWidth) {
-  const msg = document.getElementById("msg");
-  msg.textContent = "Waiting for Camera permission…";
-  const stream = await navigator.mediaDevices.getUserMedia({
-    audio: false,
-    video: {
-      facingMode: { ideal: "user" },
-      width: { ideal: 1280 },
-      height: { ideal: 720 }
-    }
-  });
-  try {
-    msg.textContent = "Capturing…";
-    const video = document.getElementById("v");
-    video.srcObject = stream;
-    await video.play();
-    // Let auto-exposure settle so the frame is not black.
-    await new Promise((r) => setTimeout(r, 650));
-    if (!video.videoWidth || !video.videoHeight) {
-      await new Promise((r) => setTimeout(r, 500));
-    }
-    let w = video.videoWidth || 640;
-    let h = video.videoHeight || 480;
-    if (maxWidth && w > maxWidth) {
-      h = Math.round((h * maxWidth) / w);
-      w = maxWidth;
-    }
-    const canvas = document.createElement("canvas");
-    canvas.width = w;
-    canvas.height = h;
-    canvas.getContext("2d").drawImage(video, 0, 0, w, h);
-    const dataUrl = canvas.toDataURL("image/jpeg", quality);
-    return { width: w, height: h, dataUrl };
-  } finally {
-    stream.getTracks().forEach((t) => t.stop());
-  }
-};
-</script>
-</body>
-</html>`;
+function cameraHtmlPath(): string {
+  // dist/screenshot/CameraService.js → ../assets/camera-capture.html
+  return path.join(__dirname, "..", "assets", "camera-capture.html");
+}
 
 /**
  * One-shot front-camera still via Chromium getUserMedia.
- * Uses a short-lived visible window so macOS shows the Camera TCC prompt
- * and lists this app under System Settings → Privacy & Security → Camera.
+ * Must load a real file:// page — Electron leaves mediaDevices undefined on data: URLs,
+ * which also prevents the app from appearing under System Settings → Camera.
  */
 export class CameraService {
   private permissionHandlerInstalled = false;
@@ -78,7 +36,6 @@ export class CameraService {
     this.permissionHandlerInstalled = true;
 
     session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
-      // Allow Chromium to proceed; macOS TCC still owns the real camera grant.
       if (permission === "media" || permission === "mediaKeySystem") {
         callback(true);
         return;
@@ -91,7 +48,6 @@ export class CameraService {
     });
   }
 
-  /** Current TCC status for logging / UI. */
   getCameraStatus(): string {
     if (process.platform !== "darwin") return "granted";
     try {
@@ -101,11 +57,6 @@ export class CameraService {
     }
   }
 
-  /**
-   * Prompt macOS Camera access. Returns true when granted.
-   * Always calls askForMediaAccess when not already granted so the app
-   * appears in System Settings → Camera.
-   */
   async ensureCameraAccess(): Promise<boolean> {
     if (process.platform !== "darwin") return true;
 
@@ -115,7 +66,6 @@ export class CameraService {
 
       if (status === "granted") return true;
 
-      // Shows the system sheet and registers this binary in Camera settings.
       const allowed = await systemPreferences.askForMediaAccess("camera");
       status = systemPreferences.getMediaAccessStatus("camera");
       log.info("Camera TCC status after prompt", { allowed, status });
@@ -149,19 +99,21 @@ export class CameraService {
 
     const granted = await this.ensureCameraAccess();
     const status = this.getCameraStatus();
-    log.info("Starting camera capture", { granted, status });
+    log.info("Starting camera capture", {
+      granted,
+      status,
+      html: cameraHtmlPath(),
+    });
 
-    // Even if askForMediaAccess returned false, still attempt getUserMedia once —
-    // a visible window often triggers the TCC prompt that registers the app.
     const quality = Math.min(1, Math.max(0.4, (options.quality ?? 85) / 100));
     const maxWidth = options.maxWidth ?? 1280;
 
     const win = new BrowserWindow({
-      // Must be visible briefly — fully hidden windows often skip the Camera TCC prompt.
+      // Visible briefly so macOS can show the Camera TCC prompt for this binary.
       show: true,
-      width: 360,
-      height: 270,
-      title: "Camera permission",
+      width: 420,
+      height: 320,
+      title: "Computer Desktop Agent — Camera",
       alwaysOnTop: true,
       skipTaskbar: false,
       focusable: true,
@@ -170,6 +122,7 @@ export class CameraService {
         contextIsolation: true,
         sandbox: false,
         backgroundThrottling: false,
+        webSecurity: true,
       },
     });
 
@@ -186,7 +139,19 @@ export class CameraService {
     let timer: NodeJS.Timeout | null = null;
 
     try {
-      await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(CAPTURE_HTML)}`);
+      // file:// is a secure context in Chromium — data: URLs often have no mediaDevices in Electron.
+      await win.loadFile(cameraHtmlPath());
+
+      // Confirm the API exists before calling into page JS.
+      const hasMedia = await win.webContents.executeJavaScript(
+        `Boolean(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)`,
+        true
+      );
+      if (!hasMedia) {
+        throw new Error(
+          "Camera API unavailable (navigator.mediaDevices is undefined). Reinstall the latest DMG."
+        );
+      }
 
       const capturePromise = win.webContents.executeJavaScript(
         `window.__captureFrontCamera(${quality}, ${maxWidth})`,
