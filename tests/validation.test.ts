@@ -61,7 +61,7 @@ describe("action validation", () => {
         type: "WAIT",
         params: { ms: 120_000 },
       })
-    ).not.toThrow(); // loose params; executor clamps via WaitParamsSchema
+    ).not.toThrow(); // loose wire params; WaitParamsSchema enforces 100–10000 in executor
   });
 });
 

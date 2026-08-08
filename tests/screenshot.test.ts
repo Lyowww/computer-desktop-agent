@@ -15,6 +15,8 @@ describe("screenshot handling", () => {
     const result = resizePngBuffer(buffer, 800);
     expect(result.width).toBe(800);
     expect(result.height).toBe(400);
+    expect(result.nativeWidth).toBe(2000);
+    expect(result.nativeHeight).toBe(1000);
     expect(result.compressed).toBe(true);
   });
 

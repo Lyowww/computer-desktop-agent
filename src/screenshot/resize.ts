@@ -4,12 +4,24 @@ export function resizePngBuffer(
   buffer: Buffer,
   maxWidth?: number,
   deflateLevel = 6
-): { width: number; height: number; compressed: boolean; buffer: Buffer } {
+): {
+  width: number;
+  height: number;
+  nativeWidth: number;
+  nativeHeight: number;
+  compressed: boolean;
+  buffer: Buffer;
+} {
   const source = PNG.sync.read(buffer);
+  const nativeWidth = source.width;
+  const nativeHeight = source.height;
+
   if (!maxWidth || source.width <= maxWidth) {
     return {
       width: source.width,
       height: source.height,
+      nativeWidth,
+      nativeHeight,
       compressed: false,
       buffer: PNG.sync.write(source, { deflateLevel }),
     };
@@ -36,6 +48,8 @@ export function resizePngBuffer(
   return {
     width: targetWidth,
     height: targetHeight,
+    nativeWidth,
+    nativeHeight,
     compressed: true,
     buffer: PNG.sync.write(target, { deflateLevel }),
   };

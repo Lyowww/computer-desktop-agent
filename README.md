@@ -1,19 +1,20 @@
 # Computer Desktop Agent
 
-Secure Electron desktop agent that runs on the user's machine, connects to the **Computer Agent Backend** over WebSocket, and executes only validated local OS actions.
+Secure Electron desktop agent that runs on the user's machine, connects to the **Computer Agent Backend** over Socket.IO, and executes only validated local OS actions.
 
-This repository is the **desktop agent only**. It does not include a website, AI model, or backend server.
+This repository is the **desktop agent only**. It does not include a website, AI model, or backend server. It never uses `OPENROUTER_API_KEY`.
 
 ## Features
 
 - System tray app with connection status, pause, screenshot, settings, reconnect, quit
-- Secure device identity + pairing code provisioning (secrets in OS keychain via `keytar`)
-- WebSocket client with exponential backoff reconnect (1s → 2s → 4s → 8s → 16s → max 30s)
-- Zod-validated actions only — no arbitrary shell or code execution
+- Device-token authentication (OS keychain via `keytar`) — not user JWT, not OpenRouter
+- Socket.IO client on namespace `/ws` with exponential backoff reconnect (1s → 30s)
+- Zod-validated allowlisted actions only — no arbitrary shell or code execution
 - Mouse, keyboard, allowlisted app launch, screenshot capture
+- Screenshot coordinate space ↔ native screen mapping (critical when backend requests `maxWidth: 1280`)
 - Permission manager (Accessibility + Screen Recording on macOS)
-- Lock-screen detection — optional Keychain unlock password wakes the lock UI and types the password when configured; otherwise refuses (`status: LOCKED`)
-- Structured local logging with secret/screenshot redaction
+- Lock-screen detection with optional Keychain unlock password
+- Structured local logging with secret / TYPE_TEXT / screenshot redaction
 - Cross-platform packaging via electron-builder (`.dmg`, `.exe`, `.AppImage`)
 
 ## Supported actions
@@ -21,33 +22,67 @@ This repository is the **desktop agent only**. It does not include a website, AI
 | Type | Description |
 |------|-------------|
 | `SCREENSHOT` | Capture screen once |
-| `CLICK` | Click at `(x, y)` |
+| `CLICK` | Click at `(x, y)` in screenshot coordinate space |
 | `DOUBLE_CLICK` | Double-click at `(x, y)` |
-| `MOVE_MOUSE` | Move cursor |
-| `TYPE_TEXT` | Type text |
-| `KEY_PRESS` | Press a single key |
-| `HOTKEY` | Chord of keys |
-| `OPEN_APP` | Launch allowlisted app |
-| `WAIT` | Wait up to 60s |
-| `LOCK_SCREEN` | Open / engage the OS lock screen |
-| `UNLOCK_SCREEN` | Wake lock UI and type the stored unlock password |
+| `MOVE_MOUSE` / `MOVE` | Move cursor |
+| `TYPE_TEXT` / `TYPE` | Type text (never passed to shell) |
+| `KEY_PRESS` / `KEY` | Press a single key |
+| `HOTKEY` | Chord of keys (`["meta","l"]` or `"CMD+L"`) |
+| `OPEN_APP` | Launch **allowlisted** app only |
+| `WAIT` | Bounded wait (`100`–`10000` ms) |
+| `ASK_USER` | Acknowledge (no OS side effect; backend/web prompts the user) |
+| `DONE` / `FAIL` | Terminal markers |
+| `LOCK_SCREEN` / `UNLOCK_SCREEN` | Lock helpers |
+
+Also accepted for tooling: `RIGHT_CLICK`, `SCROLL`, `DRAG`.
 
 ## Requirements
 
 - Node.js 20+
 - macOS, Windows, or Linux
-- Backend WebSocket endpoint (default `ws://localhost:8080/agent`)
+- Backend Socket.IO endpoint (local default `http://localhost:3000` → namespace `/ws`)
 
 ### macOS permissions
 
 Grant in **System Settings → Privacy & Security**:
 
-1. **Accessibility** — mouse/keyboard control
-2. **Screen Recording** — screenshots (restart the app after granting)
+1. **Accessibility** — mouse / keyboard control  
+2. **Screen Recording** — screenshots (restart the app after granting)  
+3. **Camera** (optional) — only if using dashboard camera capture  
 
-The agent never bypasses OS permissions. If you save an unlock password in Settings (Keychain), locked sessions can be unlocked the same way a person would: wake the lock UI and type that password.
+The agent never bypasses OS permissions. Missing permissions return a clear user-facing error.
 
-## Setup
+## Local development (full stack)
+
+```text
+Terminal 1 — backend (port 3000)
+  cd ../computer-agent-backend && npm run start:dev
+
+Terminal 2 — AI planner HTTP adapter (port 4000)
+  cd ../ai-computer-agent && npm run start:server
+
+Terminal 3 — desktop agent
+  cd ../computer-desktop-agent && npm run dev
+
+Terminal 4 — web app
+  cd ../computer-agent-web && npm run dev
+```
+
+Backend must point at the AI service:
+
+```env
+AI_SERVICE_URL=http://localhost:4000
+```
+
+Desktop `.env`:
+
+```env
+AGENT_BACKEND_URL=http://localhost:3000
+AGENT_DEVICE_NAME=My-MacBook
+AGENT_DEVICE_TOKEN=<token from Devices → Add device>
+```
+
+## Setup (desktop only)
 
 ```bash
 npm install
@@ -61,81 +96,54 @@ Development (TypeScript watch + Electron):
 npm run dev
 ```
 
-Environment overrides (optional) — copy `.env.example`:
-
-```bash
-AGENT_BACKEND_URL=ws://localhost:8080/agent
-AGENT_DEVICE_NAME=My-MacBook
-```
-
 ## Pairing / device token
-
-For the packaged **DMG** app, enter credentials by hand:
 
 1. Open the dashboard → **Devices → Add device**
 2. Copy the one-time `deviceToken`
-3. In the desktop app, use **Setup device (name + token)…** (or **Settings**)
-4. Type a **device name** and paste the **device token**
-5. Click **Save & connect**
+3. Paste into desktop **Setup** / **Settings**, or set `AGENT_DEVICE_TOKEN` in `.env` for local dev
+4. Token is stored in the OS keychain
 
-The token is stored in the OS keychain. No `.env` file is required for DMG installs.
+> The dashboard **login JWT** is only for the website. The desktop agent needs the **device token**.
 
-Optional local-dev overrides:
+### WebSocket contract (matches backend)
 
-```env
-AGENT_BACKEND_URL=wss://computer-agent-backend.onrender.com
-AGENT_DEVICE_NAME=My-MacBook
-AGENT_DEVICE_TOKEN=paste-token-here
-# Optional: macOS login password for remote unlock (prefer Settings → Keychain)
-# AGENT_UNLOCK_PASSWORD=
-```
+| Direction | Event |
+|-----------|--------|
+| Desktop → Backend | `REGISTER_DEVICE` |
+| Backend → Desktop | `DEVICE_REGISTERED` |
+| Backend → Desktop | `CAPTURE_SCREEN` |
+| Desktop → Backend | `SCREEN_RESULT` |
+| Backend → Desktop | `EXECUTE_ACTION` |
+| Desktop → Backend | `ACTION_RESULT` |
 
-> Note: the dashboard **login JWT** is only for the website. The desktop agent needs the **device token**, not the user session token.
+Task lifecycle events (`TASK_START`, `TASK_COMPLETED`, `TASK_FAILED`, …) are web-facing; the desktop agent ignores them.
 
 ### Action result
 
 ```json
 {
-  "event": "ACTION_RESULT",
-  "payload": {
-    "actionId": "act_123",
-    "success": true,
-    "status": "OK"
-  }
+  "actionId": "act_123",
+  "taskId": "…",
+  "success": true,
+  "result": { "executedAt": "2026-08-08T20:00:00.000Z" }
 }
 ```
-
-Locked desktop (no unlock password configured):
-
-```json
-{
-  "event": "ACTION_RESULT",
-  "payload": {
-    "actionId": "act_123",
-    "success": false,
-    "status": "LOCKED"
-  }
-}
-```
-
-When an unlock password is saved in Settings, the agent wakes the lock screen, types the password, and retries the action instead of returning `LOCKED`.
 
 ### Screenshot result
 
 ```json
 {
-  "event": "SCREEN_RESULT",
-  "payload": {
-    "requestId": "…",
-    "width": 1920,
-    "height": 1080,
-    "format": "png",
-    "imageBase64": "…"
-  }
+  "requestId": "…",
+  "width": 1280,
+  "height": 720,
+  "image": "<base64 png>",
+  "mimeType": "image/png"
 }
 ```
 
-Screenshots are captured **only on request** (`CAPTURE_SCREEN` or `SCREENSHOT` action), never streamed continuously.
+Returned `width`/`height` define the coordinate system for subsequent mouse actions. The agent scales clicks to native display pixels automatically.
+
+Screenshots are captured **only on request** (`CAPTURE_SCREEN` or `SCREENSHOT` action). After each `ACTION_RESULT`, the **backend** requests the next screenshot — the desktop does not auto-stream.
 
 ## Tray menu
 
@@ -152,33 +160,16 @@ Reconnect
 Quit
 ```
 
-## Project structure
-
-```
-src/
-  main/           Electron entry, tray, settings/pairing windows
-  agent/          Orchestration + action executor
-  websocket/      Client + protocol helpers
-  screenshot/     Capture + optional resize/compression
-  automation/     mouse / keyboard / applications
-  permissions/    OS permission checks + guidance
-  security/       Device identity, secure storage, lock detection
-  ipc/            Preload bridge + handlers
-  config/         Local configuration
-  utils/          Logger + Zod schemas
-```
-
 ## Security guarantees
 
 The agent will **never**:
 
-- execute arbitrary shell commands
-- execute arbitrary JavaScript from the backend
-- bypass OS permissions, antivirus, or authentication without the user-configured unlock password
+- execute arbitrary shell commands received from the backend
+- execute arbitrary JavaScript / eval / remote code from the backend
+- open non-allowlisted applications
+- bypass OS permissions
 - store auth tokens or unlock passwords in plaintext when the OS keychain is available
-- log passwords, tokens, or screenshot image data
-
-Only predefined, Zod-validated actions are executed. Application launch uses an allowlist with OS-specific path resolution (`execFile`, never shell string interpolation). Optional lock-screen unlock uses Accessibility to type the password you save in Settings — it does not crack or skip login.
+- log passwords, device tokens, OpenRouter keys, or full TYPE_TEXT / screenshot payloads
 
 ## Tests
 
@@ -186,7 +177,7 @@ Only predefined, Zod-validated actions are executed. Application launch uses an 
 npm test
 ```
 
-Coverage includes action/coordinate/keyboard validation, auth proof + pairing codes, reconnect backoff, screenshot resize, permission detection, and log redaction.
+Coverage includes coordinate scaling, action / keyboard validation, executor routing with mocked nut.js, auth, reconnect backoff, screenshot resize, permissions, and log redaction.
 
 ## Packaging
 
@@ -202,8 +193,8 @@ Artifacts are written to `release/`.
 
 - Node.js + TypeScript + Electron
 - `@nut-tree-fork/nut-js` (maintained nut.js fork) for input automation
-- `screenshot-desktop` + `pngjs` for capture/compression
-- `ws` + Zod
+- `screenshot-desktop` + `pngjs` for capture / compression
+- `socket.io-client` + Zod
 - `keytar` for secure credential storage
 - `electron-builder` for packaging
 - Vitest for unit tests

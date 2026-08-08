@@ -346,13 +346,22 @@ export class Agent extends EventEmitter {
         this.registered = true;
         this.deviceId = message.payload.deviceId;
         await this.device.markPairedWithBackendId(message.payload.deviceId);
-        log.info("Device registered with backend", { deviceId: this.deviceId });
+        log.info("Connected to backend", { deviceId: this.deviceId });
         this.emitUi();
         break;
       }
       case "EXECUTE_ACTION": {
         if (this.isDuplicate(`action:${message.payload.actionId}`)) return;
+        log.info(`Received action: ${message.payload.type}`, {
+          actionId: message.payload.actionId,
+          taskId: message.payload.taskId,
+        });
         const result = await this.executor.execute(message.payload, { paused: this.paused });
+        log.info(result.success ? "Action succeeded" : "Action failed", {
+          actionId: result.actionId,
+          success: result.success,
+          error: result.error,
+        });
         this.ws.emitEvent("ACTION_RESULT", {
           actionId: result.actionId,
           taskId: result.taskId,

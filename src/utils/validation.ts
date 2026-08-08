@@ -1,6 +1,9 @@
 import { z } from "zod";
 
-export const MouseButtonSchema = z.enum(["LEFT", "RIGHT", "MIDDLE"]);
+export const MouseButtonSchema = z.preprocess((value) => {
+  if (typeof value === "string") return value.trim().toUpperCase();
+  return value;
+}, z.enum(["LEFT", "RIGHT", "MIDDLE"]));
 
 const Coord = z.number().finite();
 
@@ -49,7 +52,26 @@ export const KeyPressParamsSchema = z
   })
   .passthrough();
 
-export const HotkeyParamsSchema = z
+function splitHotkeyToken(token: string): string[] {
+  return token
+    .split("+")
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+export const HotkeyParamsSchema = z.preprocess((raw) => {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return raw;
+  const obj = { ...(raw as Record<string, unknown>) };
+  if (typeof obj.keys === "string") {
+    obj.keys = splitHotkeyToken(obj.keys);
+  } else if (Array.isArray(obj.keys) && obj.keys.length === 1 && typeof obj.keys[0] === "string") {
+    const only = obj.keys[0];
+    if (only.includes("+")) {
+      obj.keys = splitHotkeyToken(only);
+    }
+  }
+  return obj;
+}, z
   .object({
     keys: z
       .array(
@@ -62,7 +84,7 @@ export const HotkeyParamsSchema = z
       .min(1)
       .max(6),
   })
-  .passthrough();
+  .passthrough());
 
 export const OpenAppParamsSchema = z
   .object({
@@ -74,10 +96,14 @@ export const OpenAppParamsSchema = z
   })
   .passthrough();
 
+/** Bounded wait — reject extreme values rather than sleeping forever. */
+export const WAIT_MS_MIN = 100;
+export const WAIT_MS_MAX = 10_000;
+
 export const WaitParamsSchema = z
   .object({
-    ms: z.number().int().min(0).max(60_000).optional(),
-    durationMs: z.number().int().min(0).max(60_000).optional(),
+    ms: z.number().int().min(WAIT_MS_MIN).max(WAIT_MS_MAX).optional(),
+    durationMs: z.number().int().min(WAIT_MS_MIN).max(WAIT_MS_MAX).optional(),
   })
   .passthrough()
   .superRefine((value, ctx) => {
@@ -85,6 +111,13 @@ export const WaitParamsSchema = z
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: "ms or durationMs required" });
     }
   });
+
+export const AskUserParamsSchema = z
+  .object({
+    question: z.string().min(1).max(2000),
+    reason: z.string().max(1000).optional(),
+  })
+  .passthrough();
 
 export const ScrollParamsSchema = z
   .object({
@@ -126,6 +159,7 @@ export const WireActionTypeSchema = z.enum([
   "UNLOCK_SCREEN",
   "DONE",
   "FAIL",
+  "ASK_USER",
 ]);
 
 const ForbiddenKeys = ["command", "shell", "exec", "script", "powershell", "bash", "cmd"];
@@ -357,7 +391,8 @@ export function normalizeActionType(
   | "LOCK_SCREEN"
   | "UNLOCK_SCREEN"
   | "DONE"
-  | "FAIL" {
+  | "FAIL"
+  | "ASK_USER" {
   switch (type) {
     case "TYPE":
       return "TYPE_TEXT";

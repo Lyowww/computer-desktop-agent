@@ -8,6 +8,8 @@ import {
   HotkeyParamsSchema,
   OpenAppParamsSchema,
   WaitParamsSchema,
+  AskUserParamsSchema,
+  WAIT_MS_MIN,
   ClickParamsSchema,
   DoubleClickParamsSchema,
   MoveMouseParamsSchema,
@@ -27,6 +29,11 @@ import type { ActionResultPayload, ScreenResultPayload } from "../websocket/prot
 import { mouse, Button } from "@nut-tree-fork/nut-js";
 
 const log = rootLogger.child("executor");
+
+function redactTextPreview(text: string): string {
+  if (text.length <= 8) return `[len=${text.length}]`;
+  return `[len=${text.length} prefix=${JSON.stringify(text.slice(0, 4))}…]`;
+}
 
 export class ActionExecutor {
   constructor(
@@ -107,8 +114,33 @@ export class ActionExecutor {
     }
 
     const type = normalizeActionType(action.type);
+    log.info(`Received action: ${type}`, {
+      actionId: action.actionId,
+      taskId: action.taskId,
+      type,
+    });
 
     try {
+      if (type === "ASK_USER") {
+        const params = AskUserParamsSchema.parse(action.params);
+        // Desktop never prompts UI itself — acknowledge so backend/web can ask the user.
+        log.info("ASK_USER acknowledged (no OS execution)", {
+          questionLength: params.question.length,
+        });
+        return {
+          actionId: action.actionId,
+          taskId: action.taskId,
+          success: true,
+          status: "OK",
+          result: {
+            askUser: true,
+            question: params.question,
+            reason: params.reason,
+            executedAt: new Date().toISOString(),
+          },
+        };
+      }
+
       if (type === "LOCK_SCREEN") {
         await this.unlock.openLockScreen();
         return {
@@ -163,59 +195,73 @@ export class ActionExecutor {
         case "CLICK": {
           const params = ClickParamsSchema.parse(action.params);
           await this.permissions.assertReadyForInput();
-          await this.mouseSvc.click(params.x, params.y, params.button);
+          log.info(`Executing CLICK at ${params.x},${params.y}`);
+          await this.mouseSvc.click(params.x, params.y, params.button as "LEFT" | "RIGHT" | "MIDDLE");
           break;
         }
         case "RIGHT_CLICK": {
           const params = MoveMouseParamsSchema.parse(action.params);
           await this.permissions.assertReadyForInput();
+          log.info(`Executing RIGHT_CLICK at ${params.x},${params.y}`);
           await this.mouseSvc.click(params.x, params.y, "RIGHT");
           break;
         }
         case "DOUBLE_CLICK": {
           const params = DoubleClickParamsSchema.parse(action.params);
           await this.permissions.assertReadyForInput();
-          await this.mouseSvc.doubleClick(params.x, params.y, params.button);
+          log.info(`Executing DOUBLE_CLICK at ${params.x},${params.y}`);
+          await this.mouseSvc.doubleClick(
+            params.x,
+            params.y,
+            params.button as "LEFT" | "RIGHT" | "MIDDLE"
+          );
           break;
         }
         case "MOVE_MOUSE": {
           const params = MoveMouseParamsSchema.parse(action.params);
           await this.permissions.assertReadyForInput();
+          log.info(`Executing MOVE_MOUSE at ${params.x},${params.y}`);
           await this.mouseSvc.move(params.x, params.y);
           break;
         }
         case "TYPE_TEXT": {
           const params = TypeTextParamsSchema.parse(action.params);
           await this.permissions.assertReadyForInput();
+          log.info("Executing TYPE_TEXT", { text: redactTextPreview(params.text) });
           await this.keyboard.typeText(params.text);
           break;
         }
         case "KEY_PRESS": {
           const params = KeyPressParamsSchema.parse(action.params);
           await this.permissions.assertReadyForInput();
+          log.info("Executing KEY_PRESS", { key: params.key });
           await this.keyboard.keyPress(params.key);
           break;
         }
         case "HOTKEY": {
           const params = HotkeyParamsSchema.parse(action.params);
           await this.permissions.assertReadyForInput();
+          log.info("Executing HOTKEY", { keys: params.keys });
           await this.keyboard.hotkey(params.keys);
           break;
         }
         case "OPEN_APP": {
           const params = OpenAppParamsSchema.parse(action.params);
+          log.info("Executing OPEN_APP", { app: params.app });
           const result = await this.apps.openApp(params.app);
+          log.info("Action succeeded", { type, app: result.app });
           return {
             actionId: action.actionId,
             taskId: action.taskId,
             success: true,
             status: "OK",
-            result: { app: result.app },
+            result: { app: result.app, executedAt: new Date().toISOString() },
           };
         }
         case "WAIT": {
           const params = WaitParamsSchema.parse(action.params);
-          const ms = params.ms ?? params.durationMs ?? 0;
+          const ms = params.ms ?? params.durationMs ?? WAIT_MS_MIN;
+          log.info("Executing WAIT", { ms });
           await new Promise((resolve) => setTimeout(resolve, ms));
           break;
         }
@@ -242,10 +288,16 @@ export class ActionExecutor {
         case "DRAG": {
           const params = DragParamsSchema.parse(action.params);
           await this.permissions.assertReadyForInput();
+          const from = await this.mouseSvc.resolvePoint(params.fromX, params.fromY);
+          const to = await this.mouseSvc.resolvePoint(params.toX, params.toY);
           await this.mouseSvc.move(params.fromX, params.fromY);
           await mouse.pressButton(Button.LEFT);
           await this.mouseSvc.move(params.toX, params.toY);
           await mouse.releaseButton(Button.LEFT);
+          log.info("Executing DRAG", {
+            from: { x: from.x, y: from.y },
+            to: { x: to.x, y: to.y },
+          });
           break;
         }
         case "DONE":
@@ -255,7 +307,7 @@ export class ActionExecutor {
             taskId: action.taskId,
             success: type === "DONE",
             status: "OK",
-            result: { terminal: type },
+            result: { terminal: type, executedAt: new Date().toISOString() },
           };
         default: {
           const _exhaustive: never = type;
@@ -263,11 +315,13 @@ export class ActionExecutor {
         }
       }
 
+      log.info("Action succeeded", { type, actionId: action.actionId });
       return {
         actionId: action.actionId,
         taskId: action.taskId,
         success: true,
         status: "OK",
+        result: { executedAt: new Date().toISOString() },
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

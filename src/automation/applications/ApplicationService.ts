@@ -12,9 +12,11 @@ const log = rootLogger.child("applications");
  */
 export const ALLOWED_APPS = [
   "Chrome",
+  "Google Chrome",
   "Safari",
   "Firefox",
   "VS Code",
+  "Visual Studio Code",
   "Slack",
   "Terminal",
   "Finder",
@@ -35,9 +37,11 @@ type PlatformResolvers = Record<AllowedApp, AppResolution | null>;
 
 const MAC_APPS: PlatformResolvers = {
   Chrome: { kind: "bundle", target: "/Applications/Google Chrome.app" },
+  "Google Chrome": { kind: "bundle", target: "/Applications/Google Chrome.app" },
   Safari: { kind: "bundle", target: "/Applications/Safari.app" },
   Firefox: { kind: "bundle", target: "/Applications/Firefox.app" },
   "VS Code": { kind: "bundle", target: "/Applications/Visual Studio Code.app" },
+  "Visual Studio Code": { kind: "bundle", target: "/Applications/Visual Studio Code.app" },
   Slack: { kind: "bundle", target: "/Applications/Slack.app" },
   Terminal: { kind: "bundle", target: "/System/Applications/Utilities/Terminal.app" },
   Finder: { kind: "bundle", target: "/System/Library/CoreServices/Finder.app" },
@@ -50,12 +54,20 @@ const WIN_APPS: PlatformResolvers = {
     kind: "exe",
     target: path.join(process.env.PROGRAMFILES ?? "C:\\\\Program Files", "Google", "Chrome", "Application", "chrome.exe"),
   },
+  "Google Chrome": {
+    kind: "exe",
+    target: path.join(process.env.PROGRAMFILES ?? "C:\\\\Program Files", "Google", "Chrome", "Application", "chrome.exe"),
+  },
   Safari: null,
   Firefox: {
     kind: "exe",
     target: path.join(process.env.PROGRAMFILES ?? "C:\\\\Program Files", "Mozilla Firefox", "firefox.exe"),
   },
   "VS Code": {
+    kind: "exe",
+    target: path.join(process.env.LOCALAPPDATA ?? "", "Programs", "Microsoft VS Code", "Code.exe"),
+  },
+  "Visual Studio Code": {
     kind: "exe",
     target: path.join(process.env.LOCALAPPDATA ?? "", "Programs", "Microsoft VS Code", "Code.exe"),
   },
@@ -71,9 +83,11 @@ const WIN_APPS: PlatformResolvers = {
 
 const LINUX_APPS: PlatformResolvers = {
   Chrome: { kind: "command", target: "google-chrome" },
+  "Google Chrome": { kind: "command", target: "google-chrome" },
   Safari: null,
   Firefox: { kind: "command", target: "firefox" },
   "VS Code": { kind: "command", target: "code" },
+  "Visual Studio Code": { kind: "command", target: "code" },
   Slack: { kind: "command", target: "slack" },
   Terminal: { kind: "command", target: "x-terminal-emulator" },
   Finder: { kind: "command", target: "xdg-open", args: [process.env.HOME ?? "/"] },
@@ -89,10 +103,11 @@ export function resolveAllowedApp(name: string): AllowedApp | null {
   const normalized = normalizeAppName(name);
   const aliases: Record<string, AllowedApp> = {
     chrome: "Chrome",
-    "google chrome": "Chrome",
+    "google chrome": "Google Chrome",
     safari: "Safari",
     firefox: "Firefox",
     "vs code": "VS Code",
+    "visual studio code": "Visual Studio Code",
     vscode: "VS Code",
     code: "VS Code",
     slack: "Slack",
@@ -103,7 +118,9 @@ export function resolveAllowedApp(name: string): AllowedApp | null {
     calculator: "Calculator",
     calc: "Calculator",
   };
-  return aliases[normalized] ?? null;
+  if (aliases[normalized]) return aliases[normalized];
+  const exact = ALLOWED_APPS.find((app) => normalizeAppName(app) === normalized);
+  return exact ?? null;
 }
 
 export interface ApplicationLauncherAdapter {
@@ -226,34 +243,34 @@ export class ApplicationService {
     this.launcher = launcher;
   }
 
-  private assertSafeAppName(name: string): string {
-    const trimmed = name.trim();
-    if (!/^[A-Za-z0-9][A-Za-z0-9 _.'()-]*$/.test(trimmed)) {
-      throw new Error(`Invalid application name: ${name}`);
-    }
-    if (trimmed.length > 256) {
-      throw new Error("Application name too long");
-    }
-    return trimmed;
-  }
-
   async openApp(name: string): Promise<{ app: string }> {
     const allowed = resolveAllowedApp(name);
-    if (allowed) {
-      await this.launcher.open(allowed);
-      log.info("Opened application", { app: allowed });
-      return { app: allowed };
+    if (!allowed) {
+      throw new Error(
+        `Unsupported application: "${name}". Only allowlisted apps can be opened.`
+      );
     }
-    const safe = this.assertSafeAppName(name);
-    await this.launcher.openByName(safe);
-    log.info("Opened application by name", { app: safe });
-    return { app: safe };
+    await this.launcher.open(allowed);
+    log.info("Opened application", { app: allowed });
+    return { app: allowed };
   }
 
   async closeApp(name: string): Promise<{ app: string }> {
-    const safe = this.assertSafeAppName(name);
-    await this.launcher.closeByName(safe);
-    log.info("Closed application", { app: safe });
-    return { app: safe };
+    const allowed = resolveAllowedApp(name);
+    if (!allowed) {
+      throw new Error(
+        `Unsupported application: "${name}". Only allowlisted apps can be closed.`
+      );
+    }
+    // Prefer human-readable bundle name for AppleScript / process matching.
+    const closeName =
+      allowed === "Chrome" || allowed === "Google Chrome"
+        ? "Google Chrome"
+        : allowed === "VS Code" || allowed === "Visual Studio Code"
+          ? "Visual Studio Code"
+          : allowed;
+    await this.launcher.closeByName(closeName);
+    log.info("Closed application", { app: allowed });
+    return { app: allowed };
   }
 }

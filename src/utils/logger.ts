@@ -19,11 +19,19 @@ const SENSITIVE_KEYS = [
   "authToken",
   "pairingSecret",
   "imageBase64",
+  "image",
   "screenshot",
   "privateKey",
   "secret",
   "deviceToken",
+  "jwt",
+  "openrouter",
+  "apiKey",
+  "apikey",
 ];
+
+/** Keys whose string values are truncated (never log full TYPE_TEXT content). */
+const TRUNCATE_KEYS = new Set(["text", "question", "body"]);
 
 const MAX_BUFFER = 500;
 let nextId = 1;
@@ -31,20 +39,30 @@ const buffer: LogEntry[] = [];
 const bus = new EventEmitter();
 bus.setMaxListeners(50);
 
-function redact(value: unknown): unknown {
+function redact(value: unknown, keyHint?: string): unknown {
   if (Array.isArray(value)) {
-    return value.map(redact);
+    return value.map((item) => redact(item));
   }
   if (value && typeof value === "object") {
     const out: Record<string, unknown> = {};
     for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
       if (SENSITIVE_KEYS.some((s) => key.toLowerCase().includes(s.toLowerCase()))) {
         out[key] = "[REDACTED]";
+      } else if (TRUNCATE_KEYS.has(key.toLowerCase()) && typeof nested === "string") {
+        out[key] =
+          nested.length <= 8
+            ? `[len=${nested.length}]`
+            : `[len=${nested.length} prefix=${JSON.stringify(nested.slice(0, 4))}…]`;
       } else {
-        out[key] = redact(nested);
+        out[key] = redact(nested, key);
       }
     }
     return out;
+  }
+  if (keyHint && TRUNCATE_KEYS.has(keyHint.toLowerCase()) && typeof value === "string") {
+    return value.length <= 8
+      ? `[len=${value.length}]`
+      : `[len=${value.length} prefix=${JSON.stringify(value.slice(0, 4))}…]`;
   }
   return value;
 }

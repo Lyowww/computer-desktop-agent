@@ -8,15 +8,13 @@ const log = rootLogger.child("config");
 export const DEFAULT_BACKEND_URL = "https://computer-agent-backend.onrender.com/ws";
 
 /**
- * Early local/dev URLs (localhost, /agent) break packaged DMG installs.
+ * Early broken URLs (legacy `/agent` path) that should not be used.
+ * localhost is allowed for local development.
  */
 export function isBrokenBackendUrl(url: string): boolean {
   try {
     const normalized = toSocketIoUrl(url);
     const parsed = new URL(normalized);
-    if (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1") {
-      return true;
-    }
     if (parsed.pathname === "/agent" || parsed.pathname.endsWith("/agent")) {
       return true;
     }

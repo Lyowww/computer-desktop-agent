@@ -5,7 +5,9 @@ import { validateKeyNames } from "../src/automation/keyboard/keyNames";
 describe("application launcher allowlist", () => {
   it("resolves known aliases", () => {
     expect(resolveAllowedApp("chrome")).toBe("Chrome");
+    expect(resolveAllowedApp("Google Chrome")).toBe("Google Chrome");
     expect(resolveAllowedApp("VS Code")).toBe("VS Code");
+    expect(resolveAllowedApp("Visual Studio Code")).toBe("Visual Studio Code");
     expect(resolveAllowedApp("vscode")).toBe("VS Code");
   });
 
