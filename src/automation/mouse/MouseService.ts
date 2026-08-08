@@ -1,7 +1,16 @@
 import { screen, mouse, Button, Point } from "@nut-tree-fork/nut-js";
 import { validateCoordinates } from "../../utils/validation";
 import { rootLogger } from "../../utils/logger";
-import { CoordinateMapper, coordinateMapper } from "./CoordinateMapper";
+import {
+  CoordinateMapper,
+  coordinateMapper,
+  isCoordinateMapDebugEnabled,
+} from "./CoordinateMapper";
+import { getDisplayGeometry } from "./DisplayGeometry";
+import {
+  isCoordinateDebugOverlayEnabled,
+  writeDebugOverlayFile,
+} from "../../screenshot/debugOverlay";
 
 const log = rootLogger.child("mouse");
 
@@ -16,31 +25,61 @@ const BUTTON_MAP: Record<MouseButtonName, Button> = {
 export interface ScreenBounds {
   width: number;
   height: number;
+  originX: number;
+  originY: number;
+  scaleFactor: number;
 }
 
 export class MouseService {
   constructor(private readonly coords: CoordinateMapper = coordinateMapper) {}
 
   async getScreenBounds(): Promise<ScreenBounds> {
-    const width = await screen.width();
-    const height = await screen.height();
-    return { width, height };
+    const nutWidth = await screen.width();
+    const nutHeight = await screen.height();
+    const display = await getDisplayGeometry(nutWidth, nutHeight);
+    return {
+      width: display.logicalWidth,
+      height: display.logicalHeight,
+      originX: display.originX,
+      originY: display.originY,
+      scaleFactor: display.scaleFactor,
+    };
   }
 
   /**
-   * Map AI/screenshot coordinates → native screen pixels and validate.
-   * Uses measured screenshot space vs nut-js screen size (handles Retina without hardcoding 2x).
+   * Map AI/screenshot coordinates → global nut.js screen pixels and validate.
+   * Uses measured screenshot space vs display logical size (+ origin).
    */
   async resolvePoint(
     x: number,
     y: number,
     taskId?: string
-  ): Promise<{ x: number; y: number; screenWidth: number; screenHeight: number }> {
-    const bounds = await this.getScreenBounds();
-    const mapped = this.coords.toScreen(x, y, bounds.width, bounds.height, taskId);
-    const check = validateCoordinates(mapped.x, mapped.y, bounds.width, bounds.height);
+  ): Promise<{
+    x: number;
+    y: number;
+    screenWidth: number;
+    screenHeight: number;
+    originX: number;
+    originY: number;
+  }> {
+    const nutWidth = await screen.width();
+    const nutHeight = await screen.height();
+    const display = await getDisplayGeometry(nutWidth, nutHeight);
+    const mapped = this.coords.toScreen(x, y, display, taskId);
+
+    // Validate against the display's logical rectangle in global space.
+    const localX = mapped.x - display.originX;
+    const localY = mapped.y - display.originY;
+    const check = validateCoordinates(
+      localX,
+      localY,
+      display.logicalWidth,
+      display.logicalHeight
+    );
     if (!check.ok) {
-      throw new Error(check.error);
+      throw new Error(
+        `${check.error} (mapped global=(${mapped.x},${mapped.y}) origin=(${display.originX},${display.originY}))`
+      );
     }
 
     const prefix = taskId ? `[task=${taskId}] ` : "";
@@ -49,18 +88,75 @@ export class MouseService {
       {
         from: { x, y },
         to: { x: mapped.x, y: mapped.y },
-        screenshot: { width: mapped.imageWidth, height: mapped.imageHeight },
-        screen: bounds,
+        screenshot: {
+          width: mapped.imageWidth,
+          height: mapped.imageHeight,
+          nativeWidth: mapped.nativeWidth,
+          nativeHeight: mapped.nativeHeight,
+        },
+        display: {
+          logicalWidth: display.logicalWidth,
+          logicalHeight: display.logicalHeight,
+          originX: display.originX,
+          originY: display.originY,
+          scaleFactor: display.scaleFactor,
+          source: display.source,
+        },
+        nutjs: { width: nutWidth, height: nutHeight },
+        scale: { x: mapped.scaleX, y: mapped.scaleY },
         scaled: mapped.scaled,
         taskId,
       }
     );
 
+    if (isCoordinateMapDebugEnabled()) {
+      console.log(
+        JSON.stringify({
+          level: "INFO",
+          stage: "COORDINATE_MAP",
+          SCREENSHOT_WIDTH: mapped.imageWidth,
+          SCREENSHOT_HEIGHT: mapped.imageHeight,
+          NATIVE_SCREEN_WIDTH: display.logicalWidth,
+          NATIVE_SCREEN_HEIGHT: display.logicalHeight,
+          DEVICE_PIXEL_RATIO: display.scaleFactor,
+          DISPLAY_ORIGIN_X: display.originX,
+          DISPLAY_ORIGIN_Y: display.originY,
+          AI_X: x,
+          AI_Y: y,
+          MAPPED_X: mapped.x,
+          MAPPED_Y: mapped.y,
+          SCALE_X: mapped.scaleX,
+          SCALE_Y: mapped.scaleY,
+          taskId,
+        })
+      );
+    }
+
+    if (isCoordinateDebugOverlayEnabled()) {
+      try {
+        writeDebugOverlayFile({
+          imageWidth: mapped.imageWidth,
+          imageHeight: mapped.imageHeight,
+          aiX: x,
+          aiY: y,
+          mappedX: mapped.x,
+          mappedY: mapped.y,
+          taskId,
+        });
+      } catch (err) {
+        log.warn("Failed to write coordinate debug overlay", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
     return {
       x: mapped.x,
       y: mapped.y,
-      screenWidth: bounds.width,
-      screenHeight: bounds.height,
+      screenWidth: display.logicalWidth,
+      screenHeight: display.logicalHeight,
+      originX: display.originX,
+      originY: display.originY,
     };
   }
 

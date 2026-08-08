@@ -127,6 +127,8 @@ export const ScrollParamsSchema = z
     deltaY: z.number().finite().optional(),
     amount: z.number().finite().optional(),
     direction: z.enum(["up", "down", "left", "right"]).optional(),
+    /** Scroll toward the extreme end instead of a fixed notch count. */
+    toEnd: z.boolean().optional(),
   })
   .passthrough();
 

@@ -373,20 +373,41 @@ export class ActionExecutor {
           const params = ScrollParamsSchema.parse(action.params);
           await this.permissions.assertReadyForInput();
           if (params.x !== undefined && params.y !== undefined) {
-            await this.mouseSvc.move(params.x, params.y);
+            await this.mouseSvc.move(params.x, params.y, action.taskId);
           }
-          const amount = Math.abs(params.amount ?? params.deltaY ?? 3);
           const direction =
-            params.direction ?? (params.deltaY !== undefined && params.deltaY < 0 ? "up" : "down");
-          if (direction === "up" || (params.deltaY !== undefined && params.deltaY < 0)) {
-            await mouse.scrollUp(amount);
-          } else if (direction === "left" || (params.deltaX !== undefined && params.deltaX < 0)) {
-            await mouse.scrollLeft(amount);
-          } else if (direction === "right" || (params.deltaX !== undefined && params.deltaX > 0)) {
-            await mouse.scrollRight(amount);
-          } else {
-            await mouse.scrollDown(amount);
+            params.direction ??
+            (params.deltaY !== undefined && params.deltaY < 0 ? "up" : "down");
+          // toEnd: repeat controlled scrolls instead of inventing a giant amount.
+          const toEnd = params.toEnd === true;
+          const amount = toEnd
+            ? 25
+            : Math.abs(params.amount ?? params.deltaY ?? 3);
+          const repeats = toEnd ? 8 : 1;
+          for (let i = 0; i < repeats; i++) {
+            if (direction === "up" || (params.deltaY !== undefined && params.deltaY < 0)) {
+              await mouse.scrollUp(amount);
+            } else if (
+              direction === "left" ||
+              (params.deltaX !== undefined && params.deltaX < 0)
+            ) {
+              await mouse.scrollLeft(amount);
+            } else if (
+              direction === "right" ||
+              (params.deltaX !== undefined && params.deltaX > 0)
+            ) {
+              await mouse.scrollRight(amount);
+            } else {
+              await mouse.scrollDown(amount);
+            }
           }
+          log.info("Executing SCROLL", {
+            direction,
+            amount,
+            toEnd,
+            repeats,
+            taskId: action.taskId,
+          });
           break;
         }
         case "DRAG": {

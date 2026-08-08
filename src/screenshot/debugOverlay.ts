@@ -2,6 +2,9 @@
  * Development-only coordinate debug overlay.
  * NEVER send overlay images to the AI vision model.
  */
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { PNG } from "pngjs";
 
 export function isCoordinateDebugOverlayEnabled(): boolean {
@@ -58,4 +61,51 @@ export function drawCoordinateMarker(
   }
 
   return PNG.sync.write(img);
+}
+
+/**
+ * Create a blank debug canvas with AI click marker and metadata text as pixels
+ * (no font dependency — writes a sidecar JSON next to a marked PNG).
+ */
+export function writeDebugOverlayFile(input: {
+  imageWidth: number;
+  imageHeight: number;
+  aiX: number;
+  aiY: number;
+  mappedX: number;
+  mappedY: number;
+  taskId?: string;
+}): string {
+  const dir = path.join(os.tmpdir(), "petai-coordinate-debug");
+  fs.mkdirSync(dir, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const base = `coord-${stamp}${input.taskId ? `-${input.taskId.slice(0, 8)}` : ""}`;
+
+  const blank = new PNG({
+    width: Math.max(1, Math.round(input.imageWidth)),
+    height: Math.max(1, Math.round(input.imageHeight)),
+  });
+  blank.data.fill(20);
+  const marked = drawCoordinateMarker(PNG.sync.write(blank), input.aiX, input.aiY, {
+    grid: true,
+    step: 100,
+  });
+  const pngPath = path.join(dir, `${base}.png`);
+  const jsonPath = path.join(dir, `${base}.json`);
+  fs.writeFileSync(pngPath, marked);
+  fs.writeFileSync(
+    jsonPath,
+    JSON.stringify(
+      {
+        screenshot: { width: input.imageWidth, height: input.imageHeight },
+        ai: { x: input.aiX, y: input.aiY },
+        mapped: { x: input.mappedX, y: input.mappedY },
+        taskId: input.taskId,
+        note: "AI crosshair is in screenshot space. Mapped values are nut.js global coords.",
+      },
+      null,
+      2
+    )
+  );
+  return pngPath;
 }

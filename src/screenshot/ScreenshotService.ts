@@ -45,7 +45,8 @@ export class ScreenshotService {
         coordinateMapper.noteScreenshotSpace(
           resized.width,
           resized.height,
-          options.taskId
+          options.taskId,
+          { width: resized.nativeWidth, height: resized.nativeHeight }
         );
       }
 
