@@ -119,8 +119,31 @@ export class ActionExecutor {
       taskId: action.taskId,
       type,
     });
+    console.log(
+      JSON.stringify({
+        level: "INFO",
+        stage: "DESKTOP_ACTION",
+        taskId: action.taskId,
+        actionId: action.actionId,
+        type,
+        plannedType: action.type,
+      }),
+    );
 
     try {
+      if (type !== action.type && !["TYPE", "KEY", "MOVE"].includes(action.type)) {
+        // Aliases are fine; any other remapping is a bug.
+      }
+      // Never silently convert SCROLL → CLICK or unknown → CLICK.
+      if (String(action.type).toUpperCase() === "SCROLL" && type !== "SCROLL") {
+        return {
+          actionId: action.actionId,
+          taskId: action.taskId,
+          success: false,
+          status: "ERROR",
+          error: "SCROLL action was remapped incorrectly; refusing to execute",
+        };
+      }
       if (type === "ASK_USER") {
         const params = AskUserParamsSchema.parse(action.params);
         // Desktop never prompts UI itself — acknowledge so backend/web can ask the user.
@@ -339,12 +362,26 @@ export class ActionExecutor {
       }
 
       log.info("Action succeeded", { type, actionId: action.actionId });
+      console.log(
+        JSON.stringify({
+          level: "INFO",
+          stage: "EXECUTION_RESULT",
+          taskId: action.taskId,
+          actionId: action.actionId,
+          plannedType: action.type,
+          executedType: type,
+          success: true,
+        }),
+      );
       return {
         actionId: action.actionId,
         taskId: action.taskId,
         success: true,
         status: "OK",
-        result: { executedAt: new Date().toISOString() },
+        result: {
+          executedAt: new Date().toISOString(),
+          executedType: type,
+        },
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

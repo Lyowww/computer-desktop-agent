@@ -165,6 +165,22 @@ describe("ActionExecutor with mocked OS automation", () => {
     });
   });
 
+  it("routes SCROLL via nut.js scroll APIs (never click)", async () => {
+    const { mouse } = await import("@nut-tree-fork/nut-js");
+    const result = await executor.execute(
+      {
+        actionId: "a6",
+        taskId: "00000000-0000-4000-8000-000000000001",
+        type: "SCROLL",
+        params: { direction: "down", amount: 5 },
+      },
+      { paused: false }
+    );
+    expect(result.success).toBe(true);
+    expect(mouse.scrollDown).toHaveBeenCalledWith(5);
+    expect(mouseSvc.click).not.toHaveBeenCalled();
+  });
+
   it("rejects invalid WAIT durations via schema", async () => {
     const result = await executor.execute(
       {
