@@ -31,10 +31,26 @@ describe("coordinate mapper", () => {
     expect(mapped).toMatchObject({ x: 100, y: 200 });
   });
 
-  it("passes through when no screenshot space is known", () => {
-    const mapped = mapper.toScreen(10, 20, 800, 600);
-    expect(mapped.scaled).toBe(false);
-    expect(mapped).toMatchObject({ x: 10, y: 20 });
+  it("refuses to map when no screenshot space is known", () => {
+    expect(() => mapper.toScreen(10, 20, 800, 600)).toThrow(
+      /coordinate space unknown/i
+    );
+  });
+
+  it("prefers per-task screenshot space over global", () => {
+    mapper.noteScreenshotSpace(1280, 800, "task-a");
+    mapper.noteScreenshotSpace(640, 400, "task-b");
+    const a = mapper.toScreen(100, 100, 2560, 1600, "task-a");
+    const b = mapper.toScreen(100, 100, 2560, 1600, "task-b");
+    expect(a.x).toBe(Math.round((100 / 1280) * 2560));
+    expect(b.x).toBe(Math.round((100 / 640) * 2560));
+  });
+
+  it("uses Math.round (not floor) when scaling", () => {
+    mapper.noteScreenshotSpace(1280, 832);
+    const mapped = mapper.toScreen(104, 469, 2880, 1872);
+    expect(mapped.x).toBe(Math.round((104 / 1280) * 2880));
+    expect(mapped.y).toBe(Math.round((469 / 832) * 1872));
   });
 });
 

@@ -1,4 +1,5 @@
 import screenshot from "screenshot-desktop";
+import os from "node:os";
 import { resizePngBuffer } from "./resize";
 import { rootLogger } from "../utils/logger";
 import { coordinateMapper } from "../automation/mouse/CoordinateMapper";
@@ -11,6 +12,8 @@ export interface ScreenshotOptions {
   quality?: number;
   /** When true (default), mouse actions map into this image's coordinate space. */
   bindCoordinateSpace?: boolean;
+  /** Associate space with a task so concurrent captures cannot pollute clicks. */
+  taskId?: string;
 }
 
 export interface ScreenshotResult {
@@ -28,25 +31,38 @@ export class ScreenshotService {
   /**
    * Capture the primary display once. Never streams continuously.
    * Returned width/height define the coordinate system for subsequent mouse actions.
+   * Quality: PNG with moderate deflate — do not crush vision detail.
    */
   async capture(options: ScreenshotOptions = {}): Promise<ScreenshotResult> {
     const capturePromise = (async () => {
       const raw = (await screenshot({ format: "png" })) as Buffer;
-      const deflateLevel = options.quality !== undefined && options.quality < 80 ? 9 : 6;
+      // Prefer quality for vision: only heavy deflate when caller asks for low quality.
+      const deflateLevel =
+        options.quality !== undefined && options.quality < 80 ? 9 : 6;
       const resized = resizePngBuffer(raw, options.maxWidth ?? 1280, deflateLevel);
 
       if (options.bindCoordinateSpace !== false) {
-        coordinateMapper.noteScreenshotSpace(resized.width, resized.height);
+        coordinateMapper.noteScreenshotSpace(
+          resized.width,
+          resized.height,
+          options.taskId
+        );
       }
 
-      log.info(`Screenshot captured: ${resized.width}x${resized.height}`, {
-        width: resized.width,
-        height: resized.height,
-        nativeWidth: resized.nativeWidth,
-        nativeHeight: resized.nativeHeight,
-        bytes: resized.buffer.length,
-        compressed: resized.compressed,
-      });
+      const device = os.hostname();
+      log.info(
+        `Screenshot captured: native: ${resized.nativeWidth}x${resized.nativeHeight} | AI image: ${resized.width}x${resized.height} | device: ${device}`,
+        {
+          width: resized.width,
+          height: resized.height,
+          nativeWidth: resized.nativeWidth,
+          nativeHeight: resized.nativeHeight,
+          bytes: resized.buffer.length,
+          compressed: resized.compressed,
+          device,
+          taskId: options.taskId,
+        }
+      );
 
       return {
         width: resized.width,

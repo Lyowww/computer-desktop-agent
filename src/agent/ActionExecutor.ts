@@ -178,7 +178,12 @@ export class ActionExecutor {
       switch (type) {
         case "SCREENSHOT": {
           await this.permissions.assertReadyForScreenshot();
-          const shot = await this.screenshots.capture({ maxWidth: 1920 });
+          // Do not rebind coordinate space to a different maxWidth — planning uses 1280 captures.
+          const shot = await this.screenshots.capture({
+            maxWidth: 1280,
+            bindCoordinateSpace: false,
+            taskId: action.taskId,
+          });
           return {
             actionId: action.actionId,
             taskId: action.taskId,
@@ -195,33 +200,51 @@ export class ActionExecutor {
         case "CLICK": {
           const params = ClickParamsSchema.parse(action.params);
           await this.permissions.assertReadyForInput();
-          log.info(`Executing CLICK at ${params.x},${params.y}`);
-          await this.mouseSvc.click(params.x, params.y, params.button as "LEFT" | "RIGHT" | "MIDDLE");
+          log.info(`Executing CLICK at ${params.x},${params.y}`, {
+            taskId: action.taskId,
+            targetLabel:
+              typeof (params as { targetLabel?: string }).targetLabel === "string"
+                ? (params as { targetLabel?: string }).targetLabel
+                : undefined,
+          });
+          await this.mouseSvc.click(
+            params.x,
+            params.y,
+            params.button as "LEFT" | "RIGHT" | "MIDDLE",
+            action.taskId
+          );
           break;
         }
         case "RIGHT_CLICK": {
           const params = MoveMouseParamsSchema.parse(action.params);
           await this.permissions.assertReadyForInput();
-          log.info(`Executing RIGHT_CLICK at ${params.x},${params.y}`);
-          await this.mouseSvc.click(params.x, params.y, "RIGHT");
+          log.info(`Executing RIGHT_CLICK at ${params.x},${params.y}`, {
+            taskId: action.taskId,
+          });
+          await this.mouseSvc.click(params.x, params.y, "RIGHT", action.taskId);
           break;
         }
         case "DOUBLE_CLICK": {
           const params = DoubleClickParamsSchema.parse(action.params);
           await this.permissions.assertReadyForInput();
-          log.info(`Executing DOUBLE_CLICK at ${params.x},${params.y}`);
+          log.info(`Executing DOUBLE_CLICK at ${params.x},${params.y}`, {
+            taskId: action.taskId,
+          });
           await this.mouseSvc.doubleClick(
             params.x,
             params.y,
-            params.button as "LEFT" | "RIGHT" | "MIDDLE"
+            params.button as "LEFT" | "RIGHT" | "MIDDLE",
+            action.taskId
           );
           break;
         }
         case "MOVE_MOUSE": {
           const params = MoveMouseParamsSchema.parse(action.params);
           await this.permissions.assertReadyForInput();
-          log.info(`Executing MOVE_MOUSE at ${params.x},${params.y}`);
-          await this.mouseSvc.move(params.x, params.y);
+          log.info(`Executing MOVE_MOUSE at ${params.x},${params.y}`, {
+            taskId: action.taskId,
+          });
+          await this.mouseSvc.move(params.x, params.y, action.taskId);
           break;
         }
         case "TYPE_TEXT": {
@@ -347,6 +370,9 @@ export class ActionExecutor {
     const shot = await this.screenshots.capture({
       maxWidth: options.maxWidth,
       quality: options.quality,
+      taskId: options.taskId,
+      // Preview-only captures (no task) must not overwrite task click mapping.
+      bindCoordinateSpace: Boolean(options.taskId),
     });
     return {
       requestId,

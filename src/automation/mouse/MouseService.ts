@@ -29,26 +29,33 @@ export class MouseService {
 
   /**
    * Map AI/screenshot coordinates → native screen pixels and validate.
-   * Rejects out-of-bounds coordinates instead of silently clamping.
+   * Uses measured screenshot space vs nut-js screen size (handles Retina without hardcoding 2x).
    */
   async resolvePoint(
     x: number,
-    y: number
+    y: number,
+    taskId?: string
   ): Promise<{ x: number; y: number; screenWidth: number; screenHeight: number }> {
     const bounds = await this.getScreenBounds();
-    const mapped = this.coords.toScreen(x, y, bounds.width, bounds.height);
+    const mapped = this.coords.toScreen(x, y, bounds.width, bounds.height, taskId);
     const check = validateCoordinates(mapped.x, mapped.y, bounds.width, bounds.height);
     if (!check.ok) {
       throw new Error(check.error);
     }
-    if (mapped.scaled) {
-      log.info("Scaled coordinates from screenshot space", {
+
+    const prefix = taskId ? `[task=${taskId}] ` : "";
+    log.info(
+      `${prefix}AI coordinate: x=${x} y=${y} | AI image: ${mapped.imageWidth}x${mapped.imageHeight} | native mapped: x=${mapped.x} y=${mapped.y}`,
+      {
         from: { x, y },
         to: { x: mapped.x, y: mapped.y },
-        screenshot: this.coords.getScreenshotSpace(),
+        screenshot: { width: mapped.imageWidth, height: mapped.imageHeight },
         screen: bounds,
-      });
-    }
+        scaled: mapped.scaled,
+        taskId,
+      }
+    );
+
     return {
       x: mapped.x,
       y: mapped.y,
@@ -57,26 +64,36 @@ export class MouseService {
     };
   }
 
-  async move(x: number, y: number): Promise<void> {
-    const point = await this.resolvePoint(x, y);
+  async move(x: number, y: number, taskId?: string): Promise<void> {
+    const point = await this.resolvePoint(x, y, taskId);
     mouse.config.autoDelayMs = 0;
     await mouse.setPosition(new Point(point.x, point.y));
-    log.info("Moved mouse", { x: point.x, y: point.y });
+    log.info("Moved mouse", { x: point.x, y: point.y, taskId });
   }
 
-  async click(x: number, y: number, button: MouseButtonName = "LEFT"): Promise<void> {
-    const point = await this.resolvePoint(x, y);
+  async click(
+    x: number,
+    y: number,
+    button: MouseButtonName = "LEFT",
+    taskId?: string
+  ): Promise<void> {
+    const point = await this.resolvePoint(x, y, taskId);
     mouse.config.autoDelayMs = 0;
     await mouse.setPosition(new Point(point.x, point.y));
     await mouse.click(BUTTON_MAP[button]);
-    log.info("Executing CLICK", { x: point.x, y: point.y, button });
+    log.info("Executing CLICK", { x: point.x, y: point.y, button, taskId });
   }
 
-  async doubleClick(x: number, y: number, button: MouseButtonName = "LEFT"): Promise<void> {
-    const point = await this.resolvePoint(x, y);
+  async doubleClick(
+    x: number,
+    y: number,
+    button: MouseButtonName = "LEFT",
+    taskId?: string
+  ): Promise<void> {
+    const point = await this.resolvePoint(x, y, taskId);
     mouse.config.autoDelayMs = 0;
     await mouse.setPosition(new Point(point.x, point.y));
     await mouse.doubleClick(BUTTON_MAP[button]);
-    log.info("Executing DOUBLE_CLICK", { x: point.x, y: point.y, button });
+    log.info("Executing DOUBLE_CLICK", { x: point.x, y: point.y, button, taskId });
   }
 }

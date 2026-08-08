@@ -107,7 +107,12 @@ describe("ActionExecutor with mocked OS automation", () => {
       { paused: false }
     );
     expect(result.success).toBe(true);
-    expect(mouseSvc.click).toHaveBeenCalledWith(100, 200, "LEFT");
+    expect(mouseSvc.click).toHaveBeenCalledWith(
+      100,
+      200,
+      "LEFT",
+      "00000000-0000-4000-8000-000000000001"
+    );
     expect(result.result).toMatchObject({ executedAt: expect.any(String) });
   });
 
