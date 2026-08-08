@@ -298,15 +298,18 @@ export class PermissionManager {
 
   async assertReadyForCamera(): Promise<void> {
     const status = await this.getStatus();
-    if (!status.camera) {
-      // Trigger the OS prompt once more before failing hard.
-      await this.adapter.requestAll();
-      const again = await this.getStatus();
-      if (!again.camera) {
-        throw new Error(
-          `Camera permission missing for “${again.processLabel}”. ${again.guidance.join(" ")}`.trim()
-        );
-      }
-    }
+    if (status.camera) return;
+
+    // Trigger the OS Camera sheet so this app appears under
+    // System Settings → Privacy & Security → Camera.
+    await this.adapter.requestAll();
+    const again = await this.getStatus();
+    if (again.camera) return;
+
+    // Don't hard-fail here — CameraService still opens a visible capture
+    // window which can complete the TCC prompt on first use.
+    log.warn("Camera not granted yet; capture will prompt via getUserMedia", {
+      processLabel: again.processLabel,
+    });
   }
 }
