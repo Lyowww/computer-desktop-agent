@@ -18,7 +18,12 @@ import {
 } from "../utils/validation";
 import { MouseService } from "../automation/mouse/MouseService";
 import { KeyboardService } from "../automation/keyboard/KeyboardService";
-import { ApplicationService } from "../automation/applications/ApplicationService";
+import {
+  AmbiguousApplicationError,
+  ApplicationNotFoundError,
+  ApplicationService,
+  SensitiveApplicationError,
+} from "../automation/applications/ApplicationService";
 import { ScreenshotService } from "../screenshot/ScreenshotService";
 import { CameraService } from "../screenshot/CameraService";
 import { PermissionManager } from "../permissions/PermissionManager";
@@ -294,15 +299,68 @@ export class ActionExecutor {
         case "OPEN_APP": {
           const params = OpenAppParamsSchema.parse(action.params);
           log.info("Executing OPEN_APP", { app: params.app });
-          const result = await this.apps.openApp(params.app);
-          log.info("Action succeeded", { type, app: result.app });
-          return {
-            actionId: action.actionId,
-            taskId: action.taskId,
-            success: true,
-            status: "OK",
-            result: { app: result.app, executedAt: new Date().toISOString() },
-          };
+          try {
+            const result = await this.apps.openApp(params.app);
+            log.info("Action succeeded", { type, app: result.app });
+            return {
+              actionId: action.actionId,
+              taskId: action.taskId,
+              success: true,
+              status: "OK",
+              result: {
+                app: result.app,
+                path: result.path,
+                executedAt: new Date().toISOString(),
+              },
+            };
+          } catch (error) {
+            if (error instanceof AmbiguousApplicationError) {
+              log.info("OPEN_APP ambiguous — needs user input", {
+                app: params.app,
+                candidates: error.candidates,
+              });
+              return {
+                actionId: action.actionId,
+                taskId: action.taskId,
+                success: false,
+                status: "ERROR",
+                error: error.message,
+                result: {
+                  needsUserInput: true,
+                  status: "NEEDS_USER_INPUT",
+                  question: `Multiple applications match "${params.app}": ${error.candidates.join(", ")}. Which one should I open?`,
+                  reason: "ambiguous application name",
+                  candidates: error.candidates,
+                },
+              };
+            }
+            if (error instanceof ApplicationNotFoundError) {
+              return {
+                actionId: action.actionId,
+                taskId: action.taskId,
+                success: false,
+                status: "ERROR",
+                error: error.message,
+                result: { app: params.app, found: false },
+              };
+            }
+            if (error instanceof SensitiveApplicationError) {
+              return {
+                actionId: action.actionId,
+                taskId: action.taskId,
+                success: false,
+                status: "DENIED",
+                error: error.message,
+                result: {
+                  needsUserInput: true,
+                  status: "NEEDS_USER_INPUT",
+                  question: `Opening "${params.app}" is a sensitive system application. Do you want to proceed?`,
+                  reason: error.message,
+                },
+              };
+            }
+            throw error;
+          }
         }
         case "WAIT": {
           const params = WaitParamsSchema.parse(action.params);

@@ -1,198 +1,75 @@
 import { execFile } from "child_process";
 import { promisify } from "util";
-import path from "path";
 import fs from "fs";
+import path from "path";
 import { rootLogger } from "../../utils/logger";
+import {
+  AmbiguousApplicationError,
+  ApplicationNotFoundError,
+  SensitiveApplicationError,
+  UnsafeApplicationQueryError,
+} from "./errors";
+import {
+  createApplicationDiscovery,
+  StaticApplicationDiscovery,
+} from "./discovery";
+import { isSafeAppQuery, normalizeAppName } from "./normalize";
+import { resolveApplicationFromList } from "./resolve";
+import type {
+  ApplicationDiscovery,
+  ApplicationInfo,
+  ApplicationOpener,
+  ApplicationResolveResult,
+} from "./types";
 
 const execFileAsync = promisify(execFile);
 const log = rootLogger.child("applications");
 
-/**
- * Allowlisted logical app names. Never pass arbitrary user/backend strings to a shell.
- */
-export const ALLOWED_APPS = [
-  "Chrome",
-  "Google Chrome",
-  "Safari",
-  "Firefox",
-  "VS Code",
-  "Visual Studio Code",
-  "Slack",
-  "Terminal",
-  "Finder",
-  "Notes",
-  "Calculator",
-] as const;
+export type { ApplicationInfo, ApplicationResolveResult } from "./types";
+export { normalizeAppName, isSafeAppQuery, APP_ALIASES } from "./normalize";
+export { resolveApplicationFromList } from "./resolve";
+export { isSensitiveApplication } from "./sensitive";
+export {
+  ApplicationNotFoundError,
+  AmbiguousApplicationError,
+  SensitiveApplicationError,
+  UnsafeApplicationQueryError,
+} from "./errors";
+export {
+  MacApplicationDiscovery,
+  StaticApplicationDiscovery,
+  scanApplicationDirectories,
+  createApplicationDiscovery,
+} from "./discovery";
 
-export type AllowedApp = (typeof ALLOWED_APPS)[number];
-
-interface AppResolution {
-  /** Absolute path or known app identifier — never a free-form shell command */
-  kind: "bundle" | "exe" | "desktop" | "command";
-  target: string;
-  args?: string[];
-}
-
-type PlatformResolvers = Record<AllowedApp, AppResolution | null>;
-
-const MAC_APPS: PlatformResolvers = {
-  Chrome: { kind: "bundle", target: "/Applications/Google Chrome.app" },
-  "Google Chrome": { kind: "bundle", target: "/Applications/Google Chrome.app" },
-  Safari: { kind: "bundle", target: "/Applications/Safari.app" },
-  Firefox: { kind: "bundle", target: "/Applications/Firefox.app" },
-  "VS Code": { kind: "bundle", target: "/Applications/Visual Studio Code.app" },
-  "Visual Studio Code": { kind: "bundle", target: "/Applications/Visual Studio Code.app" },
-  Slack: { kind: "bundle", target: "/Applications/Slack.app" },
-  Terminal: { kind: "bundle", target: "/System/Applications/Utilities/Terminal.app" },
-  Finder: { kind: "bundle", target: "/System/Library/CoreServices/Finder.app" },
-  Notes: { kind: "bundle", target: "/System/Applications/Notes.app" },
-  Calculator: { kind: "bundle", target: "/System/Applications/Calculator.app" },
-};
-
-const WIN_APPS: PlatformResolvers = {
-  Chrome: {
-    kind: "exe",
-    target: path.join(process.env.PROGRAMFILES ?? "C:\\\\Program Files", "Google", "Chrome", "Application", "chrome.exe"),
-  },
-  "Google Chrome": {
-    kind: "exe",
-    target: path.join(process.env.PROGRAMFILES ?? "C:\\\\Program Files", "Google", "Chrome", "Application", "chrome.exe"),
-  },
-  Safari: null,
-  Firefox: {
-    kind: "exe",
-    target: path.join(process.env.PROGRAMFILES ?? "C:\\\\Program Files", "Mozilla Firefox", "firefox.exe"),
-  },
-  "VS Code": {
-    kind: "exe",
-    target: path.join(process.env.LOCALAPPDATA ?? "", "Programs", "Microsoft VS Code", "Code.exe"),
-  },
-  "Visual Studio Code": {
-    kind: "exe",
-    target: path.join(process.env.LOCALAPPDATA ?? "", "Programs", "Microsoft VS Code", "Code.exe"),
-  },
-  Slack: {
-    kind: "exe",
-    target: path.join(process.env.LOCALAPPDATA ?? "", "slack", "slack.exe"),
-  },
-  Terminal: { kind: "command", target: "cmd.exe", args: ["/c", "start", "cmd.exe"] },
-  Finder: { kind: "command", target: "explorer.exe" },
-  Notes: null,
-  Calculator: { kind: "command", target: "calc.exe" },
-};
-
-const LINUX_APPS: PlatformResolvers = {
-  Chrome: { kind: "command", target: "google-chrome" },
-  "Google Chrome": { kind: "command", target: "google-chrome" },
-  Safari: null,
-  Firefox: { kind: "command", target: "firefox" },
-  "VS Code": { kind: "command", target: "code" },
-  "Visual Studio Code": { kind: "command", target: "code" },
-  Slack: { kind: "command", target: "slack" },
-  Terminal: { kind: "command", target: "x-terminal-emulator" },
-  Finder: { kind: "command", target: "xdg-open", args: [process.env.HOME ?? "/"] },
-  Notes: null,
-  Calculator: { kind: "command", target: "gnome-calculator" },
-};
-
-function normalizeAppName(name: string): string {
-  return name.trim().toLowerCase().replace(/\s+/g, " ");
-}
-
-export function resolveAllowedApp(name: string): AllowedApp | null {
-  const normalized = normalizeAppName(name);
-  const aliases: Record<string, AllowedApp> = {
-    chrome: "Chrome",
-    "google chrome": "Google Chrome",
-    safari: "Safari",
-    firefox: "Firefox",
-    "vs code": "VS Code",
-    "visual studio code": "Visual Studio Code",
-    vscode: "VS Code",
-    code: "VS Code",
-    slack: "Slack",
-    terminal: "Terminal",
-    finder: "Finder",
-    explorer: "Finder",
-    notes: "Notes",
-    calculator: "Calculator",
-    calc: "Calculator",
-  };
-  if (aliases[normalized]) return aliases[normalized];
-  const exact = ALLOWED_APPS.find((app) => normalizeAppName(app) === normalized);
-  return exact ?? null;
-}
-
-export interface ApplicationLauncherAdapter {
-  open(app: AllowedApp): Promise<void>;
-  openByName(name: string): Promise<void>;
-  closeByName(name: string): Promise<void>;
-}
-
-class MacApplicationLauncher implements ApplicationLauncherAdapter {
-  async open(app: AllowedApp): Promise<void> {
-    const resolution = MAC_APPS[app];
-    if (!resolution) {
-      throw new Error(`${app} is not available on macOS`);
+class MacApplicationOpener implements ApplicationOpener {
+  async open(app: ApplicationInfo): Promise<void> {
+    if (!app.path.toLowerCase().endsWith(".app") || !fs.existsSync(app.path)) {
+      throw new ApplicationNotFoundError(app.name);
     }
-    if (resolution.kind === "bundle") {
-      if (!fs.existsSync(resolution.target)) {
-        throw new Error(`Application not found: ${resolution.target}`);
-      }
-      // `open` with explicit .app path — no shell interpolation
-      await execFileAsync("/usr/bin/open", ["-a", resolution.target], { timeout: 15_000 });
-      return;
-    }
-    throw new Error(`Unsupported macOS resolution for ${app}`);
-  }
-
-  async openByName(name: string): Promise<void> {
-    await execFileAsync("/usr/bin/open", ["-a", name], { timeout: 15_000 });
+    // Absolute .app path only — never free-form shell / user strings.
+    await execFileAsync("/usr/bin/open", ["-a", app.path], { timeout: 15_000 });
   }
 
   async closeByName(name: string): Promise<void> {
-    // AppleScript string is single-quoted; escape embedded quotes.
     const escaped = name.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
     await execFileAsync(
       "/usr/bin/osascript",
       ["-e", `tell application "${escaped}" to quit`],
-      { timeout: 15_000 }
+      { timeout: 15_000 },
     );
   }
 }
 
-class WindowsApplicationLauncher implements ApplicationLauncherAdapter {
-  async open(app: AllowedApp): Promise<void> {
-    const resolution = WIN_APPS[app];
-    if (!resolution) {
-      throw new Error(`${app} is not available on Windows`);
+class WindowsApplicationOpener implements ApplicationOpener {
+  async open(app: ApplicationInfo): Promise<void> {
+    if (!fs.existsSync(app.path)) {
+      throw new ApplicationNotFoundError(app.name);
     }
-    if (resolution.kind === "exe") {
-      if (!fs.existsSync(resolution.target)) {
-        throw new Error(`Application not found: ${resolution.target}`);
-      }
-      await execFileAsync(resolution.target, resolution.args ?? [], {
-        timeout: 15_000,
-        windowsHide: true,
-      });
-      return;
-    }
-    if (resolution.kind === "command") {
-      await execFileAsync(resolution.target, resolution.args ?? [], {
-        timeout: 15_000,
-        windowsHide: true,
-      });
-      return;
-    }
-    throw new Error(`Unsupported Windows resolution for ${app}`);
-  }
-
-  async openByName(name: string): Promise<void> {
-    await execFileAsync(
-      "powershell.exe",
-      ["-NoProfile", "-Command", `Start-Process -FilePath ${JSON.stringify(name)}`],
-      { timeout: 15_000, windowsHide: true }
-    );
+    await execFileAsync(app.path, [], {
+      timeout: 15_000,
+      windowsHide: true,
+    });
   }
 
   async closeByName(name: string): Promise<void> {
@@ -203,26 +80,20 @@ class WindowsApplicationLauncher implements ApplicationLauncherAdapter {
         "-Command",
         `Get-Process -Name ${JSON.stringify(name)} -ErrorAction SilentlyContinue | Stop-Process`,
       ],
-      { timeout: 15_000, windowsHide: true }
+      { timeout: 15_000, windowsHide: true },
     );
   }
 }
 
-class LinuxApplicationLauncher implements ApplicationLauncherAdapter {
-  async open(app: AllowedApp): Promise<void> {
-    const resolution = LINUX_APPS[app];
-    if (!resolution) {
-      throw new Error(`${app} is not available on Linux`);
-    }
-    if (resolution.kind === "command") {
-      await execFileAsync(resolution.target, resolution.args ?? [], { timeout: 15_000 });
+class LinuxApplicationOpener implements ApplicationOpener {
+  async open(app: ApplicationInfo): Promise<void> {
+    if (app.path.endsWith(".desktop")) {
+      await execFileAsync("gtk-launch", [path.basename(app.path, ".desktop")], {
+        timeout: 15_000,
+      });
       return;
     }
-    throw new Error(`Unsupported Linux resolution for ${app}`);
-  }
-
-  async openByName(name: string): Promise<void> {
-    await execFileAsync(name, [], { timeout: 15_000 });
+    await execFileAsync(app.path, [], { timeout: 15_000 });
   }
 
   async closeByName(name: string): Promise<void> {
@@ -230,47 +101,159 @@ class LinuxApplicationLauncher implements ApplicationLauncherAdapter {
   }
 }
 
-export function createApplicationLauncher(platform = process.platform): ApplicationLauncherAdapter {
-  if (platform === "darwin") return new MacApplicationLauncher();
-  if (platform === "win32") return new WindowsApplicationLauncher();
-  return new LinuxApplicationLauncher();
-}
-
-export class ApplicationService {
-  private readonly launcher: ApplicationLauncherAdapter;
-
-  constructor(launcher = createApplicationLauncher()) {
-    this.launcher = launcher;
+class NoopApplicationOpener implements ApplicationOpener {
+  async open(app: ApplicationInfo): Promise<void> {
+    throw new Error(
+      `Application opening is not supported on this platform for ${app.name}`,
+    );
   }
 
-  async openApp(name: string): Promise<{ app: string }> {
-    const allowed = resolveAllowedApp(name);
-    if (!allowed) {
-      throw new Error(
-        `Unsupported application: "${name}". Only allowlisted apps can be opened.`
-      );
+  async closeByName(name: string): Promise<void> {
+    throw new Error(
+      `Application closing is not supported on this platform for ${name}`,
+    );
+  }
+}
+
+function createApplicationOpener(platform = process.platform): ApplicationOpener {
+  if (platform === "darwin") return new MacApplicationOpener();
+  if (platform === "win32") return new WindowsApplicationOpener();
+  if (platform === "linux") return new LinuxApplicationOpener();
+  return new NoopApplicationOpener();
+}
+
+export interface ApplicationServiceOptions {
+  discovery?: ApplicationDiscovery;
+  opener?: ApplicationOpener;
+}
+
+/**
+ * Resolves and opens installed GUI applications by name.
+ * AI / backend only provide `OPEN_APP { app }` — this service owns path resolution.
+ */
+export class ApplicationService {
+  private readonly discovery: ApplicationDiscovery;
+  private readonly opener: ApplicationOpener;
+
+  constructor(options: ApplicationServiceOptions = {}) {
+    this.discovery = options.discovery ?? createApplicationDiscovery();
+    this.opener = options.opener ?? createApplicationOpener();
+  }
+
+  async discoverApplications(): Promise<ApplicationInfo[]> {
+    return this.discovery.discoverApplications();
+  }
+
+  /**
+   * Find a single installed application by name.
+   * Returns null when not found. Throws AmbiguousApplicationError when ambiguous.
+   * Throws SensitiveApplicationError when the match is blocked.
+   */
+  async findApplication(name: string): Promise<ApplicationInfo | null> {
+    const result = await this.resolveApplication(name);
+    switch (result.status) {
+      case "found":
+        return result.app;
+      case "not_found":
+        return null;
+      case "ambiguous":
+        throw new AmbiguousApplicationError(
+          result.query,
+          result.candidates.map((c) => c.name),
+        );
+      case "blocked":
+        throw new SensitiveApplicationError(result.query, result.reason);
+      default: {
+        const _exhaustive: never = result;
+        return _exhaustive;
+      }
     }
-    await this.launcher.open(allowed);
-    log.info("Opened application", { app: allowed });
-    return { app: allowed };
+  }
+
+  async resolveApplication(name: string): Promise<ApplicationResolveResult> {
+    if (!isSafeAppQuery(name)) {
+      throw new UnsafeApplicationQueryError(name);
+    }
+
+    const inventory = await this.discoverApplications();
+    let result = resolveApplicationFromList(name, inventory);
+
+    if (result.status === "not_found" && this.discovery.lookupByName) {
+      const extra = await this.discovery.lookupByName(name);
+      if (extra.length > 0) {
+        const merged = [...inventory, ...extra];
+        result = resolveApplicationFromList(name, merged);
+      }
+    }
+
+    return result;
+  }
+
+  async openApplication(name: string): Promise<void> {
+    const app = await this.requireApplication(name);
+    await this.opener.open(app);
+    log.info("Opened application", { app: app.name, path: app.path });
+  }
+
+  /**
+   * Backward-compatible wrapper used by ActionExecutor / Agent.
+   */
+  async openApp(name: string): Promise<{ app: string; path: string }> {
+    const app = await this.requireApplication(name);
+    await this.opener.open(app);
+    log.info("Opened application", { app: app.name, path: app.path });
+    return { app: app.name, path: app.path };
   }
 
   async closeApp(name: string): Promise<{ app: string }> {
-    const allowed = resolveAllowedApp(name);
-    if (!allowed) {
-      throw new Error(
-        `Unsupported application: "${name}". Only allowlisted apps can be closed.`
-      );
-    }
-    // Prefer human-readable bundle name for AppleScript / process matching.
-    const closeName =
-      allowed === "Chrome" || allowed === "Google Chrome"
-        ? "Google Chrome"
-        : allowed === "VS Code" || allowed === "Visual Studio Code"
-          ? "Visual Studio Code"
-          : allowed;
-    await this.launcher.closeByName(closeName);
-    log.info("Closed application", { app: allowed });
-    return { app: allowed };
+    const app = await this.requireApplication(name);
+    await this.opener.closeByName(app.name);
+    log.info("Closed application", { app: app.name });
+    return { app: app.name };
   }
+
+  private async requireApplication(name: string): Promise<ApplicationInfo> {
+    const result = await this.resolveApplication(name);
+    switch (result.status) {
+      case "found":
+        return result.app;
+      case "not_found":
+        throw new ApplicationNotFoundError(result.query);
+      case "ambiguous":
+        throw new AmbiguousApplicationError(
+          result.query,
+          result.candidates.map((c) => c.name),
+        );
+      case "blocked":
+        throw new SensitiveApplicationError(result.query, result.reason);
+      default: {
+        const _exhaustive: never = result;
+        return _exhaustive;
+      }
+    }
+  }
+}
+
+/** @deprecated Use dynamic discovery via ApplicationService instead. */
+export const ALLOWED_APPS: readonly string[] = [];
+
+/**
+ * @deprecated Prefer ApplicationService.resolveApplication / findApplication.
+ * Kept for transitional callers — resolves against an empty allowlist.
+ */
+export function resolveAllowedApp(_name: string): string | null {
+  return null;
+}
+
+export function createTestApplicationService(
+  apps: ApplicationInfo[],
+  opener?: ApplicationOpener,
+): ApplicationService {
+  return new ApplicationService({
+    discovery: new StaticApplicationDiscovery(apps),
+    opener: opener ?? {
+      open: async () => undefined,
+      closeByName: async () => undefined,
+    },
+  });
 }

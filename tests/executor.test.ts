@@ -117,7 +117,9 @@ describe("ActionExecutor with mocked OS automation", () => {
   });
 
   it("returns ActionResult failure for unknown apps", async () => {
-    apps.openApp.mockRejectedValueOnce(new Error('Unsupported application: "bash"'));
+    apps.openApp.mockRejectedValueOnce(
+      new Error('Application "bash" was not found.'),
+    );
     const result = await executor.execute(
       {
         actionId: "a2",
@@ -128,7 +130,7 @@ describe("ActionExecutor with mocked OS automation", () => {
       { paused: false }
     );
     expect(result.success).toBe(false);
-    expect(result.error).toContain("Unsupported application");
+    expect(result.error).toContain("was not found");
   });
 
   it("acknowledges ASK_USER without OS side effects", async () => {

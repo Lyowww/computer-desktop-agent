@@ -10,7 +10,7 @@ This repository is the **desktop agent only**. It does not include a website, AI
 - Device-token authentication (OS keychain via `keytar`) — not user JWT, not OpenRouter
 - Socket.IO client on namespace `/ws` with exponential backoff reconnect (1s → 30s)
 - Zod-validated allowlisted actions only — no arbitrary shell or code execution
-- Mouse, keyboard, allowlisted app launch, screenshot capture
+- Mouse, keyboard, dynamic installed-app launch, screenshot capture
 - Screenshot coordinate space ↔ native screen mapping (critical when backend requests `maxWidth: 1280`)
 - Permission manager (Accessibility + Screen Recording on macOS)
 - Lock-screen detection with optional Keychain unlock password
@@ -28,7 +28,7 @@ This repository is the **desktop agent only**. It does not include a website, AI
 | `TYPE_TEXT` / `TYPE` | Type text (never passed to shell) |
 | `KEY_PRESS` / `KEY` | Press a single key |
 | `HOTKEY` | Chord of keys (`["meta","l"]` or `"CMD+L"`) |
-| `OPEN_APP` | Launch **allowlisted** app only |
+| `OPEN_APP` | Launch an installed GUI app by name (dynamic macOS discovery; no shell) |
 | `WAIT` | Bounded wait (`100`–`10000` ms) |
 | `ASK_USER` | Acknowledge (no OS side effect; backend/web prompts the user) |
 | `DONE` / `FAIL` | Terminal markers |
@@ -166,7 +166,8 @@ The agent will **never**:
 
 - execute arbitrary shell commands received from the backend
 - execute arbitrary JavaScript / eval / remote code from the backend
-- open non-allowlisted applications
+- open apps by free-form shell/`open`/`osascript` commands from the AI (only `OPEN_APP` name resolution)
+- open sensitive system/admin utilities without confirmation
 - bypass OS permissions
 - store auth tokens or unlock passwords in plaintext when the OS keychain is available
 - log passwords, device tokens, OpenRouter keys, or full TYPE_TEXT / screenshot payloads
