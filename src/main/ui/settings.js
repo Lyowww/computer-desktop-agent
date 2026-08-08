@@ -51,6 +51,7 @@ async function load() {
     `Screen locked: ${state.locked ? "yes" : "no"}`,
     `Accessibility: ${perms.accessibility ? "granted" : "missing"}`,
     `Screen Recording: ${perms.screenRecording ? "granted" : "missing"}`,
+    `Camera: ${perms.camera ? "granted" : "missing"}`,
     ...(perms.guidance || []),
   ];
   document.getElementById("perms").textContent = lines.join("\n");
@@ -158,6 +159,10 @@ document.getElementById("accessibility").addEventListener("click", async () => {
 
 document.getElementById("screen").addEventListener("click", async () => {
   await window.agentApi.openPermissionSettings("screenRecording");
+});
+
+document.getElementById("camera").addEventListener("click", async () => {
+  await window.agentApi.openPermissionSettings("camera");
 });
 
 void load();

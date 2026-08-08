@@ -5,7 +5,7 @@ import { rootLogger } from "../utils/logger";
 const log = rootLogger.child("permissions-ui");
 
 /**
- * macOS cannot grant Accessibility / Screen Recording via sudo.
+ * macOS cannot grant Accessibility / Screen Recording / Camera via sudo.
  * This flow triggers system prompts and opens Privacy settings for the user.
  */
 export async function ensurePermissionsOnStartup(): Promise<PermissionStatus> {
@@ -14,7 +14,7 @@ export async function ensurePermissionsOnStartup(): Promise<PermissionStatus> {
   // Always attempt prompts first (idempotent if already granted)
   let status = await manager.requestAll();
 
-  if (status.accessibility && status.screenRecording) {
+  if (status.accessibility && status.screenRecording && status.camera) {
     log.info("All required permissions granted", { processLabel: status.processLabel });
     return status;
   }
@@ -22,13 +22,14 @@ export async function ensurePermissionsOnStartup(): Promise<PermissionStatus> {
   const missing: string[] = [];
   if (!status.accessibility) missing.push("Accessibility (mouse & keyboard)");
   if (!status.screenRecording) missing.push("Screen Recording (screenshots)");
+  if (!status.camera) missing.push("Camera (front camera shots)");
 
   const detail = [
     `Enable these for “${status.processLabel}” in System Settings:`,
     ...missing.map((m) => `• ${m}`),
     "",
     "macOS does not allow sudo (or any app) to bypass these privacy controls.",
-    "After enabling Screen Recording, quit and reopen this app.",
+    "After enabling Screen Recording or Camera, quit and reopen this app.",
     "",
     "When running with npm start, the process name is usually “Electron”.",
   ].join("\n");
@@ -41,11 +42,12 @@ export async function ensurePermissionsOnStartup(): Promise<PermissionStatus> {
     buttons: [
       "Open Accessibility settings",
       "Open Screen Recording settings",
+      "Open Camera settings",
       "I’ve enabled them — Recheck",
       "Continue anyway",
     ],
     defaultId: 0,
-    cancelId: 3,
+    cancelId: 4,
     noLink: true,
   });
 
@@ -54,8 +56,10 @@ export async function ensurePermissionsOnStartup(): Promise<PermissionStatus> {
   } else if (response === 1) {
     await manager.openSettings("screenRecording");
   } else if (response === 2) {
+    await manager.openSettings("camera");
+  } else if (response === 3) {
     status = await manager.requestAll();
-    if (!status.accessibility || !status.screenRecording) {
+    if (!status.accessibility || !status.screenRecording || !status.camera) {
       await dialog.showMessageBox({
         type: "info",
         title: "Still missing permissions",
@@ -67,27 +71,32 @@ export async function ensurePermissionsOnStartup(): Promise<PermissionStatus> {
       await dialog.showMessageBox({
         type: "info",
         title: "Permissions OK",
-        message: "Accessibility and Screen Recording look granted.",
+        message: "Accessibility, Screen Recording, and Camera look granted.",
         buttons: ["OK"],
       });
     }
   }
 
-  if (Notification.isSupported() && (!status.accessibility || !status.screenRecording)) {
+  if (
+    Notification.isSupported() &&
+    (!status.accessibility || !status.screenRecording || !status.camera)
+  ) {
     new Notification({
       title: "Permissions still needed",
       body: `Enable “${status.processLabel}” under Privacy & Security, then restart the agent.`,
     }).show();
   }
 
-  // Offer to open both panes once if anything is still missing
   if (!status.accessibility) {
     await manager.openSettings("accessibility");
   }
   if (!status.screenRecording) {
-    // slight delay so first Settings pane can open
     await new Promise((r) => setTimeout(r, 600));
     await manager.openSettings("screenRecording");
+  }
+  if (!status.camera) {
+    await new Promise((r) => setTimeout(r, 600));
+    await manager.openSettings("camera");
   }
 
   return status;
@@ -97,12 +106,12 @@ export async function promptPermissionsFromTray(): Promise<void> {
   const manager = new PermissionManager();
   const status = await manager.requestAll();
 
-  if (status.accessibility && status.screenRecording) {
+  if (status.accessibility && status.screenRecording && status.camera) {
     await dialog.showMessageBox({
       type: "info",
       title: "Permissions",
       message: `All set for “${status.processLabel}”`,
-      detail: "Accessibility and Screen Recording are granted.",
+      detail: "Accessibility, Screen Recording, and Camera are granted.",
       buttons: ["OK"],
     });
     return;

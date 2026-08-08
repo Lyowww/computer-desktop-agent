@@ -166,6 +166,17 @@ export const CaptureScreenMessageSchema = z.object({
   }),
 });
 
+export const CaptureCameraMessageSchema = z.object({
+  event: z.literal("CAPTURE_CAMERA"),
+  payload: z.object({
+    requestId: z.string().min(1),
+    maxWidth: z.number().int().positive().max(7680).optional(),
+    quality: z.number().int().min(1).max(100).optional(),
+    taskId: z.string().optional(),
+    deviceId: z.string().optional(),
+  }),
+});
+
 export const NotifyMessageSchema = z.object({
   event: z.literal("NOTIFY"),
   payload: z.object({
@@ -234,6 +245,7 @@ export const UnlockScreenMessageSchema = z.object({
 export const ServerMessageSchema = z.discriminatedUnion("event", [
   ExecuteActionMessageSchema,
   CaptureScreenMessageSchema,
+  CaptureCameraMessageSchema,
   NotifyMessageSchema,
   ListProcessesMessageSchema,
   ListAppsMessageSchema,
@@ -295,6 +307,7 @@ export const IGNORED_SERVER_EVENTS = new Set([
   "AI_RESPONSE",
   "ACTION_RESULT",
   "SCREEN_RESULT",
+  "CAMERA_RESULT",
   "USER_MESSAGE",
   "REGISTER_DEVICE",
   "PROCESSES_RESULT",
@@ -361,6 +374,7 @@ export function normalizeActionType(
 const COMMAND_EVENTS_REQUIRING_PAYLOAD = new Set([
   "EXECUTE_ACTION",
   "CAPTURE_SCREEN",
+  "CAPTURE_CAMERA",
   "NOTIFY",
   "LIST_PROCESSES",
   "LIST_APPS",

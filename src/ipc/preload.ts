@@ -16,7 +16,7 @@ export interface AgentBridge {
   setUnlockPassword: (password: string) => Promise<boolean>;
   clearUnlockPassword: () => Promise<boolean>;
   getPermissions: () => Promise<unknown>;
-  openPermissionSettings: (kind: "accessibility" | "screenRecording") => Promise<boolean>;
+  openPermissionSettings: (kind: "accessibility" | "screenRecording" | "camera") => Promise<boolean>;
   openLogs: () => Promise<boolean>;
   getLogs: () => Promise<unknown[]>;
   clearLogs: () => Promise<boolean>;

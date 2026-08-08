@@ -24,6 +24,7 @@ describe("permission detection", () => {
       new FakePermissionAdapter({
         accessibility: false,
         screenRecording: true,
+        camera: true,
         platform: "darwin",
         processLabel: "Electron",
         guidance: [
@@ -44,6 +45,7 @@ describe("permission detection", () => {
       new FakePermissionAdapter({
         accessibility: true,
         screenRecording: true,
+        camera: true,
         platform: "darwin",
         processLabel: "Electron",
         guidance: [],

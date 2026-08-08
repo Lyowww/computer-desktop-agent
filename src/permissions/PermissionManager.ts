@@ -9,17 +9,20 @@ const log = rootLogger.child("permissions");
 export interface PermissionStatus {
   accessibility: boolean;
   screenRecording: boolean;
+  camera: boolean;
   platform: NodeJS.Platform;
   guidance: string[];
   /** Process name the user must enable in System Settings */
   processLabel: string;
 }
 
+export type PermissionSettingsKind = "accessibility" | "screenRecording" | "camera";
+
 export interface PermissionAdapter {
   check(): Promise<PermissionStatus>;
   /** Trigger OS prompts where possible, then open Settings for anything still missing. */
   requestAll(): Promise<PermissionStatus>;
-  openSystemSettings(kind: "accessibility" | "screenRecording"): Promise<void>;
+  openSystemSettings(kind: PermissionSettingsKind): Promise<void>;
 }
 
 function processLabel(): string {
@@ -34,6 +37,7 @@ class MacPermissionAdapter implements PermissionAdapter {
   async check(): Promise<PermissionStatus> {
     const accessibility = this.checkAccessibility();
     const screenRecording = await this.checkScreenRecording();
+    const camera = this.checkCamera();
     const label = processLabel();
     const guidance: string[] = [];
 
@@ -47,10 +51,16 @@ class MacPermissionAdapter implements PermissionAdapter {
         `Grant Screen Recording: System Settings → Privacy & Security → Screen Recording → enable “${label}”, then quit and reopen this app.`
       );
     }
+    if (!camera) {
+      guidance.push(
+        `Grant Camera: System Settings → Privacy & Security → Camera → enable “${label}”.`
+      );
+    }
 
     return {
       accessibility,
       screenRecording,
+      camera,
       platform: "darwin",
       guidance,
       processLabel: label,
@@ -103,17 +113,27 @@ class MacPermissionAdapter implements PermissionAdapter {
       // ignore — Electron desktopCapturer is the primary path
     }
 
+    // 3) Camera — system sheet for webcam access
+    try {
+      await systemPreferences.askForMediaAccess("camera");
+    } catch (error) {
+      log.warn("Camera prompt failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
     // Give the user a moment if a system sheet appeared
     await new Promise((r) => setTimeout(r, 400));
     return this.check();
   }
 
-  async openSystemSettings(kind: "accessibility" | "screenRecording"): Promise<void> {
-    // Modern macOS URLs (Ventura+)
+  async openSystemSettings(kind: PermissionSettingsKind): Promise<void> {
     const modern =
       kind === "accessibility"
         ? "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
-        : "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture";
+        : kind === "screenRecording"
+          ? "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
+          : "x-apple.systempreferences:com.apple.preference.security?Privacy_Camera";
     try {
       await execFileAsync("/usr/bin/open", [modern]);
     } catch {
@@ -128,6 +148,17 @@ class MacPermissionAdapter implements PermissionAdapter {
       return systemPreferences.isTrustedAccessibilityClient(false);
     } catch (error) {
       log.warn("Accessibility check failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return false;
+    }
+  }
+
+  private checkCamera(): boolean {
+    try {
+      return systemPreferences.getMediaAccessStatus("camera") === "granted";
+    } catch (error) {
+      log.warn("Camera check failed", {
         error: error instanceof Error ? error.message : String(error),
       });
       return false;
@@ -164,6 +195,7 @@ class WindowsPermissionAdapter implements PermissionAdapter {
     return {
       accessibility: true,
       screenRecording: true,
+      camera: true,
       platform: "win32",
       guidance: [],
       processLabel: processLabel(),
@@ -175,7 +207,9 @@ class WindowsPermissionAdapter implements PermissionAdapter {
   }
 
   async openSystemSettings(): Promise<void> {
-    await execFileAsync("cmd.exe", ["/c", "start", "ms-settings:privacy"], { windowsHide: true });
+    await execFileAsync("cmd.exe", ["/c", "start", "ms-settings:privacy-webcam"], {
+      windowsHide: true,
+    });
   }
 }
 
@@ -190,6 +224,7 @@ class LinuxPermissionAdapter implements PermissionAdapter {
     return {
       accessibility: true,
       screenRecording: true,
+      camera: true,
       platform: "linux",
       guidance,
       processLabel: processLabel(),
@@ -233,12 +268,13 @@ export class PermissionManager {
     log.info("Permission request finished", {
       accessibility: status.accessibility,
       screenRecording: status.screenRecording,
+      camera: status.camera,
       processLabel: status.processLabel,
     });
     return status;
   }
 
-  async openSettings(kind: "accessibility" | "screenRecording"): Promise<void> {
+  async openSettings(kind: PermissionSettingsKind): Promise<void> {
     await this.adapter.openSystemSettings(kind);
   }
 
@@ -257,6 +293,20 @@ export class PermissionManager {
       throw new Error(
         `Screen Recording permission missing for “${status.processLabel}”. ${status.guidance.join(" ")}`.trim()
       );
+    }
+  }
+
+  async assertReadyForCamera(): Promise<void> {
+    const status = await this.getStatus();
+    if (!status.camera) {
+      // Trigger the OS prompt once more before failing hard.
+      await this.adapter.requestAll();
+      const again = await this.getStatus();
+      if (!again.camera) {
+        throw new Error(
+          `Camera permission missing for “${again.processLabel}”. ${again.guidance.join(" ")}`.trim()
+        );
+      }
     }
   }
 }

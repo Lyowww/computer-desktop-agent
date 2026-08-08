@@ -155,6 +155,7 @@ export class AgentWebSocketClient extends EventEmitter {
       "DEVICE_REGISTERED",
       "EXECUTE_ACTION",
       "CAPTURE_SCREEN",
+      "CAPTURE_CAMERA",
       "NOTIFY",
       "LIST_PROCESSES",
       "LIST_APPS",
@@ -173,6 +174,7 @@ export class AgentWebSocketClient extends EventEmitter {
 
     const commandEvents = new Set([
       "CAPTURE_SCREEN",
+      "CAPTURE_CAMERA",
       "NOTIFY",
       "EXECUTE_ACTION",
       "LIST_PROCESSES",

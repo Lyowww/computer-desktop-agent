@@ -73,7 +73,8 @@
       "extendInfo": {
         "NSAppleEventsUsageDescription": "Computer Desktop Agent needs Apple Events to open applications.",
         "NSAccessibilityUsageDescription": "Computer Desktop Agent needs Accessibility permission to control the mouse and keyboard.",
-        "NSScreenCaptureUsageDescription": "Computer Desktop Agent needs Screen Recording permission to capture screenshots."
+        "NSScreenCaptureUsageDescription": "Computer Desktop Agent needs Screen Recording permission to capture screenshots.",
+        "NSCameraUsageDescription": "Computer Desktop Agent needs Camera permission to capture a still from the front camera when you request it from the dashboard."
       }
     },
     "win": {

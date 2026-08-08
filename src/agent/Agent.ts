@@ -304,6 +304,7 @@ export class Agent extends EventEmitter {
       if (
         rawEvent === "NOTIFY" ||
         rawEvent === "CAPTURE_SCREEN" ||
+        rawEvent === "CAPTURE_CAMERA" ||
         rawEvent === "EXECUTE_ACTION" ||
         rawEvent === "LIST_PROCESSES" ||
         rawEvent === "LIST_APPS" ||
@@ -411,6 +412,58 @@ export class Agent extends EventEmitter {
           }
         } catch (error) {
           emitScreenError(error instanceof Error ? error.message : String(error));
+        }
+        break;
+      }
+      case "CAPTURE_CAMERA": {
+        if (this.isDuplicate(`camera:${message.payload.requestId}`)) {
+          log.info("Ignoring duplicate CAPTURE_CAMERA", {
+            requestId: message.payload.requestId,
+          });
+          return;
+        }
+        log.info("Received CAPTURE_CAMERA", {
+          requestId: message.payload.requestId,
+          maxWidth: message.payload.maxWidth ?? 1280,
+        });
+        const emitCameraError = (error: string) => {
+          log.warn("Camera capture failed; sending CAMERA_RESULT error", {
+            requestId: message.payload.requestId,
+            error,
+          });
+          this.ws.emitEvent("CAMERA_RESULT", {
+            requestId: message.payload.requestId,
+            taskId: message.payload.taskId,
+            error,
+          });
+        };
+        if (this.paused) {
+          emitCameraError("Agent is paused");
+          break;
+        }
+        try {
+          const result = await this.executor.captureCamera(message.payload.requestId, {
+            maxWidth: message.payload.maxWidth ?? 1280,
+            quality: message.payload.quality ?? 85,
+            taskId: message.payload.taskId,
+          });
+          if ("image" in result && result.image) {
+            log.info("Sending CAMERA_RESULT", {
+              requestId: result.requestId,
+              width: result.width,
+              height: result.height,
+              bytes: Math.round((result.image.length * 3) / 4),
+            });
+            this.ws.emitEvent("CAMERA_RESULT", result);
+          } else {
+            const errMsg =
+              "error" in result && typeof result.error === "string"
+                ? result.error
+                : "Camera capture failed";
+            emitCameraError(errMsg);
+          }
+        } catch (error) {
+          emitCameraError(error instanceof Error ? error.message : String(error));
         }
         break;
       }

@@ -18,6 +18,7 @@ import { MouseService } from "../automation/mouse/MouseService";
 import { KeyboardService } from "../automation/keyboard/KeyboardService";
 import { ApplicationService } from "../automation/applications/ApplicationService";
 import { ScreenshotService } from "../screenshot/ScreenshotService";
+import { CameraService } from "../screenshot/CameraService";
 import { PermissionManager } from "../permissions/PermissionManager";
 import { LockScreenDetector } from "../security/LockScreenDetector";
 import { UnlockService } from "../security/UnlockService";
@@ -33,6 +34,7 @@ export class ActionExecutor {
     private readonly keyboard = new KeyboardService(),
     private readonly apps = new ApplicationService(),
     private readonly screenshots = new ScreenshotService(),
+    private readonly camera = new CameraService(),
     private readonly permissions = new PermissionManager(),
     private readonly lockScreen = new LockScreenDetector(),
     private readonly unlock = new UnlockService()
@@ -299,6 +301,28 @@ export class ActionExecutor {
       height: shot.height,
       image: shot.imageBase64,
       mimeType: "image/png",
+    };
+  }
+
+  async captureCamera(
+    requestId: string,
+    options: { maxWidth?: number; quality?: number; taskId?: string } = {}
+  ): Promise<ScreenResultPayload | ActionResultPayload> {
+    const lockBlock = await this.ensureDesktopReady(requestId, options.taskId ?? requestId);
+    if (lockBlock) return lockBlock;
+
+    await this.permissions.assertReadyForCamera();
+    const shot = await this.camera.capture({
+      maxWidth: options.maxWidth,
+      quality: options.quality,
+    });
+    return {
+      requestId,
+      taskId: options.taskId,
+      width: shot.width,
+      height: shot.height,
+      image: shot.imageBase64,
+      mimeType: shot.mimeType,
     };
   }
 }

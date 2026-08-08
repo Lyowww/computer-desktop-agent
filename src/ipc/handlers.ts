@@ -78,7 +78,7 @@ export function registerIpcHandlers(ctx: IpcContext): void {
 
   ipcMain.handle(
     "agent:openPermissionSettings",
-    async (_event, kind: "accessibility" | "screenRecording") => {
+    async (_event, kind: "accessibility" | "screenRecording" | "camera") => {
       const manager = new PermissionManager();
       await manager.openSettings(kind);
       return true;
