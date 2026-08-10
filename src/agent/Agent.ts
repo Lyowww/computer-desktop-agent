@@ -9,6 +9,7 @@ import { LockScreenDetector } from "../security/LockScreenDetector";
 import { UnlockService } from "../security/UnlockService";
 import { NotifyService } from "../automation/system/NotifyService";
 import { SystemInfoService } from "../automation/system/SystemInfoService";
+import { DeviceTelemetryCollector } from "../automation/system/DeviceTelemetryCollector";
 import { ApplicationService } from "../automation/applications/ApplicationService";
 import { ConfigService, configService } from "../config/Config";
 import { ServerMessageSchema, normalizeIncomingMessage } from "../utils/validation";
@@ -16,6 +17,9 @@ import { rootLogger } from "../utils/logger";
 import { ZodError } from "zod";
 
 const log = rootLogger.child("Agent");
+
+/** How often to push full device telemetry (not every heartbeat). */
+const TELEMETRY_INTERVAL_MS = 5 * 60_000;
 
 function platformOs(): "darwin" | "win32" | "linux" {
   const p = os.platform();
@@ -46,10 +50,12 @@ export class Agent extends EventEmitter {
   private readonly unlock: UnlockService;
   private readonly notify: NotifyService;
   private readonly systemInfo: SystemInfoService;
+  private readonly telemetry: DeviceTelemetryCollector;
   private readonly apps: ApplicationService;
   private readonly config: ConfigService;
   private statusTimer: NodeJS.Timeout | null = null;
   private pingTimer: NodeJS.Timeout | null = null;
+  private telemetryTimer: NodeJS.Timeout | null = null;
   private identityReady = false;
   private deviceId = "";
   private pairingCode = "";
@@ -57,6 +63,10 @@ export class Agent extends EventEmitter {
   private registered = false;
   private hasDeviceToken = false;
   private recentKeys = new Map<string, number>();
+  private lastPingSentAt = 0;
+  private lastLatencyMs: number | undefined;
+  /** True after we have pushed at least one telemetry sample that included latency. */
+  private telemetryHasLatency = false;
 
   constructor(deps?: {
     ws?: AgentWebSocketClient;
@@ -83,6 +93,7 @@ export class Agent extends EventEmitter {
     this.unlock = deps?.unlock ?? new UnlockService();
     this.notify = new NotifyService();
     this.systemInfo = new SystemInfoService();
+    this.telemetry = new DeviceTelemetryCollector();
     this.apps = new ApplicationService();
     this.paused = cfg.paused;
 
@@ -97,6 +108,7 @@ export class Agent extends EventEmitter {
     });
     this.ws.on("close", () => {
       this.registered = false;
+      this.telemetryHasLatency = false;
       this.emitUi();
     });
   }
@@ -127,9 +139,17 @@ export class Agent extends EventEmitter {
     this.statusTimer = setInterval(() => void this.publishStatus(), 30_000);
     this.pingTimer = setInterval(() => {
       if (this.ws.isConnected() && this.registered) {
-        this.ws.emitEvent("PING", { requestId: `ping_${Date.now()}` });
+        this.lastPingSentAt = Date.now();
+        this.ws.emitEvent("PING", {
+          requestId: `ping_${this.lastPingSentAt}`,
+        });
       }
     }, 25_000);
+    this.telemetryTimer = setInterval(() => {
+      if (this.ws.isConnected() && this.registered) {
+        void this.sendTelemetry();
+      }
+    }, TELEMETRY_INTERVAL_MS);
   }
 
   async stop(): Promise<void> {
@@ -140,6 +160,10 @@ export class Agent extends EventEmitter {
     if (this.pingTimer) {
       clearInterval(this.pingTimer);
       this.pingTimer = null;
+    }
+    if (this.telemetryTimer) {
+      clearInterval(this.telemetryTimer);
+      this.telemetryTimer = null;
     }
     this.ws.disconnect();
   }
@@ -344,10 +368,17 @@ export class Agent extends EventEmitter {
       case "DEVICE_REGISTERED": {
         if (!message.payload) return;
         this.registered = true;
+        this.telemetryHasLatency = false;
         this.deviceId = message.payload.deviceId;
         await this.device.markPairedWithBackendId(message.payload.deviceId);
         log.info("Connected to backend", { deviceId: this.deviceId });
         this.emitUi();
+        void this.sendTelemetry();
+        // Kick an immediate ping so latency can land in a follow-up telemetry push.
+        this.lastPingSentAt = Date.now();
+        this.ws.emitEvent("PING", {
+          requestId: `ping_${this.lastPingSentAt}`,
+        });
         break;
       }
       case "EXECUTE_ACTION": {
@@ -629,6 +660,17 @@ export class Agent extends EventEmitter {
         });
         break;
       }
+      case "PONG": {
+        if (this.lastPingSentAt > 0) {
+          this.lastLatencyMs = Math.max(0, Date.now() - this.lastPingSentAt);
+          this.lastPingSentAt = 0;
+          // First measured RTT — refresh telemetry so Network latency/quality populate.
+          if (!this.telemetryHasLatency && this.registered) {
+            void this.sendTelemetry();
+          }
+        }
+        break;
+      }
       case "ERROR": {
         if (!message.payload) return;
         log.warn("Backend ERROR event", {
@@ -670,6 +712,30 @@ export class Agent extends EventEmitter {
       },
     };
     this.emit("status", payload);
+  }
+
+  /** Push structured device management telemetry to the backend (not high-frequency). */
+  private async sendTelemetry(): Promise<void> {
+    if (!this.ws.isConnected() || !this.registered) return;
+    try {
+      const payload = await this.telemetry.collect(this.lastLatencyMs);
+      const ok = this.ws.emitEvent("DEVICE_TELEMETRY", payload);
+      if (ok) {
+        if (payload.network?.latencyMs != null) {
+          this.telemetryHasLatency = true;
+        }
+        log.info("Sent DEVICE_TELEMETRY", {
+          hostname: payload.system?.hostname,
+          localIp: payload.network?.localIp,
+          latencyMs: payload.network?.latencyMs,
+          cpu: payload.system?.cpu?.model,
+        });
+      }
+    } catch (error) {
+      log.warn("Failed to collect/send device telemetry", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   private emitUi(): void {

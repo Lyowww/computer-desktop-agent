@@ -5,7 +5,8 @@ export type ClientEvent =
   | "STATUS"
   | "PONG"
   | "ERROR"
-  | "PING";
+  | "PING"
+  | "DEVICE_TELEMETRY";
 
 export interface RegisterDevicePayload {
   deviceToken: string;

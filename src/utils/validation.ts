@@ -351,6 +351,8 @@ export const IGNORED_SERVER_EVENTS = new Set([
   "NOTIFY_RESULT",
   "APP_ACTION_RESULT",
   "LOCK_RESULT",
+  "DEVICE_TELEMETRY",
+  "DEVICE_INFO_UPDATED",
 ]);
 
 export type ExecuteActionPayload = z.infer<typeof ExecuteActionPayloadSchema>;
